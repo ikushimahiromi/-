@@ -1,0 +1,11 @@
+{
+  "name": "note-research",
+  "version": "1.0.0",
+  "description": "note の売れ筋有料記事をリサーチするローカルアプリ",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "demo": "NOTE_DEMO=1 node server.js"
+  },
+  "engines": { "node": ">=18" }
+}

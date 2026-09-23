@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>note 売れ筋リサーチ</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>note 売れ筋リサーチ</h1>
+    <p class="sub">キーワードやクリエイターから、売れている有料noteの傾向を調べます</p>
+  </header>
+
+  <main>
+    <form id="searchForm" class="panel search">
+      <div class="seg" role="radiogroup" aria-label="検索モード">
+        <label><input type="radio" name="mode" value="search" checked> キーワード</label>
+        <label><input type="radio" name="mode" value="creator"> クリエイター</label>
+      </div>
+      <input id="q" type="text" placeholder="例: 副業, ChatGPT, 投資（カンマ区切りで複数可）" autocomplete="off" required>
+      <label class="inline">取得件数
+        <select id="pages">
+          <option value="1">20件</option>
+          <option value="3" selected>60件</option>
+          <option value="5">100件</option>
+          <option value="10">200件</option>
+        </select>
+      </label>
+      <button type="submit" id="go">調べる</button>
+    </form>
+
+    <p id="status" class="status" role="status"></p>
+
+    <section id="results" hidden>
+      <div class="panel filters">
+        <label><input type="checkbox" id="paidOnly" checked> 有料のみ</label>
+        <label class="inline">価格 <input type="number" id="minPrice" min="0" step="100" placeholder="下限">〜<input type="number" id="maxPrice" min="0" step="100" placeholder="上限">円</label>
+        <label class="inline">スキ <input type="number" id="minLikes" min="0" step="10" placeholder="0">以上</label>
+        <label class="inline">期間
+          <select id="period">
+            <option value="0">すべて</option>
+            <option value="30">30日以内</option>
+            <option value="90">90日以内</option>
+            <option value="180">半年以内</option>
+            <option value="365">1年以内</option>
+          </select>
+        </label>
+        <label class="inline">並び替え
+          <select id="sort">
+            <option value="revenue">推定売上順</option>
+            <option value="likes">スキ順</option>
+            <option value="velocity">勢い順（スキ/日）</option>
+            <option value="price">価格順</option>
+            <option value="date">新着順</option>
+          </select>
+        </label>
+        <label class="inline" title="スキ1件あたり何件売れていると仮定するか">購入率係数
+          <input type="number" id="ratio" min="0.1" max="10" step="0.1" value="1">
+        </label>
+      </div>
+
+      <div class="tiles" id="tiles"></div>
+
+      <div class="grid2">
+        <figure class="panel chart">
+          <figcaption>価格帯別 — 記事数</figcaption>
+          <div class="bars" id="chartCount"></div>
+        </figure>
+        <figure class="panel chart">
+          <figcaption>価格帯別 — 平均スキ数</figcaption>
+          <div class="bars" id="chartLikes"></div>
+        </figure>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <h2>よく使われるハッシュタグ</h2>
+          <ol class="rank" id="tagRank"></ol>
+        </div>
+        <div class="panel">
+          <h2>売れているクリエイター</h2>
+          <ol class="rank" id="creatorRank"></ol>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="table-head">
+          <h2>記事一覧 <span id="count" class="muted"></span></h2>
+          <button type="button" id="csv" class="ghost">CSVダウンロード</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>#</th><th>タイトル</th><th>クリエイター</th><th class="num">価格</th><th class="num">スキ</th><th class="num">スキ/日</th><th class="num">推定売上</th><th>公開日</th></tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <p class="note-text">
+        ※ noteは購入数を公開していないため、「推定売上」は <b>価格 × スキ数 × 購入率係数</b> で出した目安です。実際の売上とは異なります。
+      </p>
+    </section>
+  </main>
+
+  <div id="tooltip" class="tooltip" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
