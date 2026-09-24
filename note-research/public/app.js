@@ -35,8 +35,50 @@ function enrich(n) {
   const ageDays = published ? Math.max(1, (Date.now() - published.getTime()) / DAY) : null;
   // 公開直後の記事が極端に高く出ないよう、最低 7 日として割る
   const velocity = ageDays ? n.likes / Math.max(7, ageDays) : 0;
-  return { ...n, published, ageDays, velocity };
+  const recentPerDay = n.recentLikes !== null && n.recentLikes !== undefined && n.recentDays ? n.recentLikes / n.recentDays : null;
+  // 閲覧数は非公開のため、フォロワー数に対するスキの割合を「反応率」として使う
+  const engagement = n.likes / Math.max(100, n.creator.followers);
+  return { ...n, published, ageDays, velocity, recentPerDay, momentum: recentPerDay ?? velocity, engagement };
 }
+
+// ---- 総合スコア ----
+// 各指標を「集めた記事の中で上位何%か」に直してから重み付けで合算する（0〜100）
+const SCORE_FACTORS = [
+  { id: 'wLikes', label: '累計スキ', get: (n) => n.likes },
+  { id: 'wRecent', label: '直近の伸び', get: (n) => n.momentum },
+  { id: 'wEngage', label: '反応率', get: (n) => n.engagement },
+  { id: 'wPrice', label: '価格', get: (n) => n.price },
+];
+
+function percentileRanks(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const n = sorted.length;
+  return values.map((v) => {
+    if (n < 2) return 1;
+    let lo = 0, hi = n;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (sorted[m] < v) lo = m + 1; else hi = m; }
+    let up = lo;
+    while (up < n && sorted[up] === v) up++;
+    return ((lo + up - 1) / 2) / (n - 1); // 同値は平均順位
+  });
+}
+
+function scoreNotes(list) {
+  const weights = SCORE_FACTORS.map((f) => Math.max(0, Number($(f.id).value) || 0));
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  const ranks = SCORE_FACTORS.map((f) => percentileRanks(list.map(f.get)));
+  return list.map((n, i) => {
+    const parts = SCORE_FACTORS.map((f, j) => ({ label: f.label, pct: ranks[j][i], w: weights[j] }));
+    const score = (parts.reduce((s, p) => s + p.pct * p.w, 0) / total) * 100;
+    return { ...n, score, scoreParts: parts };
+  });
+}
+
+const scoreTitle = (n) => n.scoreParts.map((p) => `${p.label}: 上位${Math.max(1, Math.round((1 - p.pct) * 100))}%`).join(' / ');
+const recentCell = (n) => (n.recentLikes === null || n.recentLikes === undefined
+  ? '<span class="muted" title="次回以降の取得から計測します">記録開始</span>'
+  : `+${num(n.recentLikes)}<br><span class="muted">${Math.round(n.recentDays)}日間</span>`);
+const scoreCell = (n) => `<td class="num" title="${escapeHtml(scoreTitle(n))}"><span class="score">${Math.round(n.score)}</span></td>`;
 
 // requests: [{ label, url }] を順に取得し、記事をキーで重複排除してまとめる
 async function loadNotes(requests) {
@@ -74,6 +116,7 @@ function showResults(notes, demo, label) {
   allNotes = notes;
   setStatus(`${label}: ${allNotes.length}件の記事を取得しました${demo ? '（デモデータ）' : ''}`);
   $('results').hidden = false;
+  updateWeightsPanel();
   render();
 }
 
@@ -118,8 +161,11 @@ function render() {
       && n.likes >= f.minLikes
       && (!f.period || (n.ageDays !== null && n.ageDays <= f.period)))
     .map((n) => ({ ...n, revenue: n.price * n.likes * f.ratio }));
+  view = scoreNotes(view);
 
   const sorters = {
+    score: (a, b) => b.score - a.score,
+    recent: (a, b) => b.momentum - a.momentum,
     revenue: (a, b) => b.revenue - a.revenue || b.likes - a.likes,
     likes: (a, b) => b.likes - a.likes,
     velocity: (a, b) => b.velocity - a.velocity,
@@ -227,17 +273,18 @@ function renderTable() {
       <td>${escapeHtml(n.creator.name)}<br><span class="muted">フォロワー ${num(n.creator.followers)}</span></td>
       <td class="num">${n.isPaid ? yen(n.price) : '無料'}</td>
       <td class="num">${num(n.likes)}</td>
-      <td class="num">${n.velocity.toFixed(2)}</td>
+      <td class="num">${recentCell(n)}</td>
       <td class="num">${n.revenue ? yen(n.revenue) : '—'}</td>
+      ${scoreCell(n)}
       <td>${n.published ? n.published.toLocaleDateString('ja-JP') : '—'}</td>
-    </tr>`).join('') || '<tr><td colspan="8" class="muted">条件に合う記事がありません</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="9" class="muted">条件に合う記事がありません</td></tr>';
 }
 
 function downloadCsv() {
-  const head = ['タイトル', 'URL', 'クリエイター', 'フォロワー', '価格', 'スキ', 'スキ/日', '推定売上', '公開日', 'ハッシュタグ'];
+  const head = ['タイトル', 'URL', 'ジャンル', 'クリエイター', 'フォロワー', '価格', 'スキ', 'スキ/日', '直近スキ', '直近日数', '反応率', '推定売上', '総合スコア', '公開日', 'ハッシュタグ'];
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const lines = view.map((n) => [n.title, n.url, n.creator.name, n.creator.followers, n.price, n.likes,
-    n.velocity.toFixed(2), Math.round(n.revenue), n.published ? n.published.toISOString().slice(0, 10) : '', n.hashtags.join(' ')].map(cell).join(','));
+  const lines = view.map((n) => [n.title, n.url, n.genre || '', n.creator.name, n.creator.followers, n.price, n.likes,
+    n.velocity.toFixed(2), n.recentLikes ?? '', n.recentDays ? Math.round(n.recentDays) : '', n.engagement.toFixed(3), Math.round(n.revenue), Math.round(n.score), n.published ? n.published.toISOString().slice(0, 10) : '', n.hashtags.join(' ')].map(cell).join(','));
   const blob = new Blob(['﻿' + [head.map(cell).join(','), ...lines].join('\r\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -260,6 +307,10 @@ $('searchForm').addEventListener('submit', runSearch);
 $('csv').addEventListener('click', downloadCsv);
 
 // ---- モード切り替え ----
+function updateWeightsPanel() {
+  $('weightsPanel').hidden = mode === 'ranking' ? !rankingNotes.length : !allNotes.length;
+}
+
 function setMode(next) {
   mode = next;
   document.querySelectorAll('.tabs [role="tab"]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.mode === mode)));
@@ -268,6 +319,7 @@ function setMode(next) {
   $('rankingPanel').hidden = mode !== 'ranking';
   $('ranking').hidden = mode !== 'ranking' || !rankingNotes.length;
   $('results').hidden = mode === 'ranking' || !allNotes.length;
+  updateWeightsPanel();
   $('q').placeholder = mode === 'creator'
     ? '例: note.com/xxxx の xxxx（カンマ区切りで複数可）'
     : '例: 副業, ChatGPT, 投資（カンマ区切りで複数可）';
@@ -294,6 +346,8 @@ async function loadGenres() {
 
 // ---- ランキング ----
 const METRICS = {
+  score: { label: '平均総合スコア', note: (n) => n.score, fmt: (v) => v.toFixed(1) },
+  recent: { label: '平均 直近スキ/日', note: (n) => n.momentum, fmt: (v) => v.toFixed(2) },
   revenue: { label: '推定売上合計', note: (n) => n.revenue, fmt: yen },
   likes: { label: '平均スキ', note: (n) => n.likes, fmt: num },
   velocity: { label: '平均スキ/日', note: (n) => n.velocity, fmt: (v) => v.toFixed(2) },
@@ -306,6 +360,7 @@ function buildRanking() {
     rankingNotes = notes.filter((n) => n.isPaid).map((n) => ({ ...n, revenue: n.price * n.likes }));
     setStatus(`${genres.length}ジャンル・有料記事${rankingNotes.length}件からランキングを作成しました${demo ? '（デモデータ）' : ''}`);
     $('ranking').hidden = false;
+    updateWeightsPanel();
     renderRanking();
   });
 }
@@ -317,7 +372,7 @@ function renderRanking() {
   const period = Number($('rkPeriod').value) || 0;
   const metricKey = $('rkMetric').value;
   const metric = METRICS[metricKey];
-  const inPeriod = rankingNotes.filter((n) => !period || (n.ageDays !== null && n.ageDays <= period));
+  const inPeriod = scoreNotes(rankingNotes.filter((n) => !period || (n.ageDays !== null && n.ageDays <= period)));
 
   // ジャンル別
   const byGenre = genres.map((g) => {
@@ -362,9 +417,10 @@ function renderRanking() {
       <td>${escapeHtml(n.creator.name)}</td>
       <td class="num">${yen(n.price)}</td>
       <td class="num">${num(n.likes)}</td>
-      <td class="num">${n.velocity.toFixed(2)}</td>
+      <td class="num">${recentCell(n)}</td>
       <td class="num">${yen(n.revenue)}</td>
-    </tr>`).join('') || '<tr><td colspan="8" class="muted">該当する有料記事がありません</td></tr>';
+      ${scoreCell(n)}
+    </tr>`).join('') || '<tr><td colspan="9" class="muted">該当する有料記事がありません</td></tr>';
 
   // クリエイター
   const byCreator = new Map();
@@ -381,6 +437,10 @@ function renderRanking() {
 }
 
 $('rkBuild').addEventListener('click', buildRanking);
+SCORE_FACTORS.forEach((f) => $(f.id).addEventListener('input', () => {
+  if (allNotes.length) render();
+  if (rankingNotes.length) renderRanking();
+}));
 ['rkPeriod', 'rkMetric', 'rkGenreFilter'].forEach((id) => $(id).addEventListener('input', () => rankingNotes.length && renderRanking()));
 
 loadGenres();

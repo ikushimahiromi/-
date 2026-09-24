@@ -151,3 +151,14 @@ td.bar-col { display: flex; align-items: center; gap: 8px; }
 .mini-val { font-variant-numeric: tabular-nums; font-size: 12px; min-width: 84px; text-align: right; }
 .rank li { flex-wrap: wrap; }
 #rkCreators li span:last-child { white-space: normal; text-align: right; margin-left: auto; }
+
+/* 総合スコア */
+.weights summary { cursor: pointer; font-weight: 600; }
+.weights-grid { display: flex; flex-wrap: wrap; gap: 10px 20px; margin: 12px 0 4px; }
+.weights-grid label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
+.weights-grid input { width: 64px; }
+.weights ul { padding-left: 18px; margin: 8px 0 0; }
+.score {
+  display: inline-block; min-width: 34px; padding: 1px 6px; border-radius: 4px; text-align: center;
+  font-weight: 700; background: var(--grid); color: var(--text);
+}

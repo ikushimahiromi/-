@@ -40,6 +40,65 @@ const GENRES = [
 const cache = new Map();
 let lastRequestAt = 0;
 
+// ---- スキ数の履歴（直近のスキ増加を出すため、取得のたびに記録する） ----
+const DATA_DIR = path.join(__dirname, 'data');
+const SNAPSHOT_FILE = path.join(DATA_DIR, 'snapshots.json');
+const SNAPSHOT_MIN_INTERVAL_MS = 60 * 60 * 1000; // 同じ記事は 1 時間に 1 回まで記録
+const SNAPSHOT_MAX_PER_NOTE = 60;
+const SNAPSHOT_EXPIRE_MS = 120 * 86400000;
+const RECENT_WINDOW_DAYS = 7;
+let snapshots = {};
+try {
+  snapshots = JSON.parse(fs.readFileSync(SNAPSHOT_FILE, 'utf8'));
+} catch {
+  snapshots = {};
+}
+let saveTimer = null;
+function saveSnapshotsSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const cutoff = Date.now() - SNAPSHOT_EXPIRE_MS;
+    for (const [k, list] of Object.entries(snapshots)) {
+      if (!list.length || list[list.length - 1][0] < cutoff) delete snapshots[k];
+    }
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFile(SNAPSHOT_FILE, JSON.stringify(snapshots), (err) => err && console.error('履歴の保存に失敗:', err.message));
+  }, 1000);
+}
+
+// 記事ごとに [時刻, スキ数] を記録し、約 7 日前の記録との差を recentLikes として付ける
+function attachHistory(notes) {
+  const now = Date.now();
+  let changed = false;
+  const out = notes.map((n) => {
+    const k = n.key || String(n.id);
+    const list = snapshots[k] || (snapshots[k] = []);
+    const last = list[list.length - 1];
+    if (!last || now - last[0] >= SNAPSHOT_MIN_INTERVAL_MS) {
+      list.push([now, n.likes]);
+      if (list.length > SNAPSHOT_MAX_PER_NOTE) list.splice(0, list.length - SNAPSHOT_MAX_PER_NOTE);
+      changed = true;
+    }
+    const windowStart = now - RECENT_WINDOW_DAYS * 86400000;
+    // 7 日より前の最新の記録。無ければ一番古い記録を基準にする
+    const base = [...list].reverse().find(([t]) => t <= windowStart) || list[0];
+    const spanDays = (now - base[0]) / 86400000;
+    if (spanDays < 0.5) return { ...n, recentLikes: null, recentDays: 0, trackedSince: list[0][0] };
+    return { ...n, recentLikes: Math.max(0, n.likes - base[1]), recentDays: spanDays, trackedSince: list[0][0] };
+  });
+  if (changed) saveSnapshotsSoon();
+  return out;
+}
+
+// デモモードでは履歴が無いので、それらしい直近スキを付ける
+function demoHistory(notes) {
+  return notes.map((n, i) => {
+    const r = ((n.likes * 7919 + i * 104729) % 1000) / 1000;
+    return { ...n, recentLikes: Math.round(n.likes * r * r * 0.25), recentDays: RECENT_WINDOW_DAYS, trackedSince: Date.now() - 30 * 86400000 };
+  });
+}
+const withHistory = (notes) => (DEMO ? demoHistory(notes) : attachHistory(notes));
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchJson(url) {
@@ -182,7 +241,7 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/api/search') {
       const q = (u.searchParams.get('q') || '').trim();
       if (!q) return sendJson(res, 400, { error: 'キーワードを入力してください' });
-      return sendJson(res, 200, { query: q, demo: DEMO, notes: await searchNotes(q, pages) });
+      return sendJson(res, 200, { query: q, demo: DEMO, notes: withHistory(await searchNotes(q, pages)) });
     }
     if (u.pathname === '/api/genres') {
       return sendJson(res, 200, { genres: GENRES });
@@ -190,12 +249,12 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/api/genre') {
       const genre = GENRES.find((g) => g.id === u.searchParams.get('id'));
       if (!genre) return sendJson(res, 400, { error: 'ジャンルが見つかりません' });
-      return sendJson(res, 200, { query: genre.name, demo: DEMO, notes: await genreNotes(genre, pages) });
+      return sendJson(res, 200, { query: genre.name, demo: DEMO, notes: withHistory(await genreNotes(genre, pages)) });
     }
     if (u.pathname === '/api/creator') {
       const id = (u.searchParams.get('id') || '').trim().replace(/^https?:\/\/note\.com\//, '').replace(/\/.*$/, '');
       if (!/^[A-Za-z0-9_-]+$/.test(id)) return sendJson(res, 400, { error: 'クリエイターID（note.com/xxxx の xxxx）を入力してください' });
-      return sendJson(res, 200, { query: id, demo: DEMO, notes: await creatorNotes(id, pages) });
+      return sendJson(res, 200, { query: id, demo: DEMO, notes: withHistory(await creatorNotes(id, pages)) });
     }
     if (req.method === 'GET') return serveStatic(req, res, u.pathname);
     sendJson(res, 405, { error: 'method not allowed' });
@@ -210,4 +269,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { normalizeNote, server, GENRES };
+module.exports = { normalizeNote, attachHistory, server, GENRES, _snapshots: () => snapshots };

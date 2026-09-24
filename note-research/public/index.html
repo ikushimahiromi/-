@@ -58,7 +58,9 @@
       </label>
       <label class="inline">ランキング基準
         <select id="rkMetric">
+          <option value="score">総合スコア</option>
           <option value="revenue">推定売上</option>
+          <option value="recent">直近の伸び</option>
           <option value="likes">スキ数</option>
           <option value="velocity">勢い（スキ/日）</option>
         </select>
@@ -68,6 +70,23 @@
     </div>
 
     <p id="status" class="status" role="status"></p>
+
+    <details class="panel weights" id="weightsPanel">
+      <summary>総合スコアの配分 <span class="muted">— 何を重視して「売れている」と判断するか</span></summary>
+      <div class="weights-grid">
+        <label>累計スキ <input type="number" id="wLikes" min="0" max="100" step="5" value="35"></label>
+        <label>直近の伸び <input type="number" id="wRecent" min="0" max="100" step="5" value="35"></label>
+        <label>反応率 <input type="number" id="wEngage" min="0" max="100" step="5" value="15"></label>
+        <label>価格 <input type="number" id="wPrice" min="0" max="100" step="5" value="15"></label>
+      </div>
+      <ul class="note-text">
+        <li><b>累計スキ</b>: 記事についたスキの合計。</li>
+        <li><b>直近の伸び</b>: 直近7日間に増えたスキ（1日あたり）。このアプリが取得するたびにスキ数を記録して差を出すため、2回目以降の取得から表示されます。記録が無い記事は「公開からのスキ/日」で代用します。</li>
+        <li><b>反応率</b>: フォロワー数に対するスキの割合。noteの閲覧数（PV）は著者本人しか見られないため、その代わりの指標です。フォロワーが少ないのにスキが多い記事ほど高くなります。</li>
+        <li><b>価格</b>: 同じスキ数なら高い記事ほど売上が大きいため。</li>
+        <li>各指標を「集めた記事の中で上位何%か」に直して配分どおりに合算し、0〜100点にします。スコアにマウスを乗せると内訳が見られます。</li>
+      </ul>
+    </details>
 
     <section id="results" hidden>
       <div class="panel filters">
@@ -85,7 +104,9 @@
         </label>
         <label class="inline">並び替え
           <select id="sort">
+            <option value="score">総合スコア順</option>
             <option value="revenue">推定売上順</option>
+            <option value="recent">直近の伸び順</option>
             <option value="likes">スキ順</option>
             <option value="velocity">勢い順（スキ/日）</option>
             <option value="price">価格順</option>
@@ -129,7 +150,7 @@
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>#</th><th>タイトル</th><th>クリエイター</th><th class="num">価格</th><th class="num">スキ</th><th class="num">スキ/日</th><th class="num">推定売上</th><th>公開日</th></tr>
+              <tr><th>#</th><th>タイトル</th><th>クリエイター</th><th class="num">価格</th><th class="num">スキ</th><th class="num">直近スキ</th><th class="num">推定売上</th><th class="num">総合</th><th>公開日</th></tr>
             </thead>
             <tbody id="rows"></tbody>
           </table>
@@ -160,7 +181,7 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th class="num">順位</th><th>タイトル</th><th>ジャンル</th><th>クリエイター</th><th class="num">価格</th><th class="num">スキ</th><th class="num">スキ/日</th><th class="num">推定売上</th></tr></thead>
+            <thead><tr><th class="num">順位</th><th>タイトル</th><th>ジャンル</th><th>クリエイター</th><th class="num">価格</th><th class="num">スキ</th><th class="num">直近スキ</th><th class="num">推定売上</th><th class="num">総合</th></tr></thead>
             <tbody id="rkNoteRows"></tbody>
           </table>
         </div>
