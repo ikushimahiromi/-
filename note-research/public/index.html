@@ -9,15 +9,32 @@
 <body>
   <header class="top">
     <h1>note 売れ筋リサーチ</h1>
-    <p class="sub">キーワードやクリエイターから、売れている有料noteの傾向を調べます</p>
+    <p class="sub">ジャンル・キーワード・クリエイターから、売れている有料noteを調べます</p>
   </header>
 
   <main>
-    <form id="searchForm" class="panel search">
-      <div class="seg" role="radiogroup" aria-label="検索モード">
-        <label><input type="radio" name="mode" value="search" checked> キーワード</label>
-        <label><input type="radio" name="mode" value="creator"> クリエイター</label>
+    <nav class="tabs" role="tablist" aria-label="モード">
+      <button type="button" role="tab" data-mode="genre" aria-selected="true">ジャンル</button>
+      <button type="button" role="tab" data-mode="ranking" aria-selected="false">ランキング</button>
+      <button type="button" role="tab" data-mode="search" aria-selected="false">キーワード</button>
+      <button type="button" role="tab" data-mode="creator" aria-selected="false">クリエイター</button>
+    </nav>
+
+    <div id="genrePanel" class="panel">
+      <div class="panel-head">
+        <h2>ジャンルを選んで売れ筋を調べる</h2>
+        <label class="inline">取得件数
+          <select id="genrePages">
+            <option value="1">少なめ（速い）</option>
+            <option value="2" selected>ふつう</option>
+            <option value="4">多め（遅い）</option>
+          </select>
+        </label>
       </div>
+      <div class="chips" id="genreChips"></div>
+    </div>
+
+    <form id="searchForm" class="panel search" hidden>
       <input id="q" type="text" placeholder="例: 副業, ChatGPT, 投資（カンマ区切りで複数可）" autocomplete="off" required>
       <label class="inline">取得件数
         <select id="pages">
@@ -29,6 +46,26 @@
       </label>
       <button type="submit" id="go">調べる</button>
     </form>
+
+    <div id="rankingPanel" class="panel filters" hidden>
+      <label class="inline">集計期間
+        <select id="rkPeriod">
+          <option value="30">30日以内</option>
+          <option value="90" selected>90日以内</option>
+          <option value="365">1年以内</option>
+          <option value="0">全期間</option>
+        </select>
+      </label>
+      <label class="inline">ランキング基準
+        <select id="rkMetric">
+          <option value="revenue">推定売上</option>
+          <option value="likes">スキ数</option>
+          <option value="velocity">勢い（スキ/日）</option>
+        </select>
+      </label>
+      <button type="button" id="rkBuild">ランキングを作成</button>
+      <span class="muted">全ジャンルを調べるので1分ほどかかります</span>
+    </div>
 
     <p id="status" class="status" role="status"></p>
 
@@ -101,6 +138,41 @@
 
       <p class="note-text">
         ※ noteは購入数を公開していないため、「推定売上」は <b>価格 × スキ数 × 購入率係数</b> で出した目安です。実際の売上とは異なります。
+      </p>
+    </section>
+    <section id="ranking" hidden>
+      <div class="panel">
+        <h2>ジャンル別ランキング</h2>
+        <div class="table-wrap">
+          <table class="rk-genre">
+            <thead><tr><th class="num">順位</th><th>ジャンル</th><th class="num">有料記事</th><th class="num">中央価格</th><th class="num">平均スキ</th><th class="num">勢い</th><th class="bar-col" id="rkGenreMetric">推定売上合計</th></tr></thead>
+            <tbody id="rkGenreRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="table-head">
+          <h2>売れ筋note ランキング</h2>
+          <label class="inline">ジャンル
+            <select id="rkGenreFilter"><option value="">すべて</option></select>
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">順位</th><th>タイトル</th><th>ジャンル</th><th>クリエイター</th><th class="num">価格</th><th class="num">スキ</th><th class="num">スキ/日</th><th class="num">推定売上</th></tr></thead>
+            <tbody id="rkNoteRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>売れ筋クリエイター ランキング</h2>
+        <ol class="rank" id="rkCreators"></ol>
+      </div>
+
+      <p class="note-text">
+        ※ 有料記事のみを集計しています。noteは購入数を公開していないため、「推定売上」は <b>価格 × スキ数</b> で出した目安です（有料記事のスキは購入者が付けることが多いため、売れ行きの目安になります）。
       </p>
     </section>
   </main>

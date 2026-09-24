@@ -18,6 +18,25 @@ const MAX_PAGES = 10;
 const REQUEST_INTERVAL_MS = 1000; // note へのアクセスは 1 秒に 1 回まで
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
+// ジャンル → そのジャンルで売れやすい記事を拾うための検索キーワード
+const GENRES = [
+  { id: 'fukugyo', name: '副業・お金稼ぎ', keywords: ['副業', '稼ぐ方法', '収益化'] },
+  { id: 'toushi', name: '投資・資産運用', keywords: ['投資', '株式投資', '仮想通貨'] },
+  { id: 'ai', name: 'AI・ChatGPT', keywords: ['ChatGPT', '生成AI', 'AI活用'] },
+  { id: 'marketing', name: 'マーケティング・SNS', keywords: ['マーケティング', 'SNS運用', 'Instagram'] },
+  { id: 'writing', name: 'ブログ・ライティング', keywords: ['ブログ', 'ライティング', 'Webライター'] },
+  { id: 'sedori', name: '物販・せどり', keywords: ['せどり', '物販', 'メルカリ'] },
+  { id: 'programming', name: 'プログラミング・IT', keywords: ['プログラミング', 'エンジニア', 'Python'] },
+  { id: 'career', name: '転職・キャリア', keywords: ['転職', 'キャリア', '就活'] },
+  { id: 'jikokeihatsu', name: '自己啓発・仕事術', keywords: ['自己啓発', '仕事術', '習慣化'] },
+  { id: 'renai', name: '恋愛・婚活', keywords: ['恋愛', '婚活', 'マッチングアプリ'] },
+  { id: 'biyou', name: '美容・ダイエット', keywords: ['美容', 'ダイエット', 'スキンケア'] },
+  { id: 'kenkou', name: '健康・メンタル', keywords: ['健康', 'メンタル', '筋トレ'] },
+  { id: 'uranai', name: '占い・スピリチュアル', keywords: ['占い', 'スピリチュアル', '星読み'] },
+  { id: 'keiba', name: '競馬・ギャンブル予想', keywords: ['競馬予想', '競艇', 'スポーツ予想'] },
+  { id: 'kyouiku', name: '子育て・教育', keywords: ['子育て', '受験', '英語学習'] },
+];
+
 const cache = new Map();
 let lastRequestAt = 0;
 
@@ -90,6 +109,16 @@ async function searchNotes(q, pages) {
   return out;
 }
 
+async function genreNotes(genre, pages) {
+  const merged = new Map();
+  for (const kw of genre.keywords) {
+    for (const n of await searchNotes(kw, pages)) {
+      if (!merged.has(n.key || n.id)) merged.set(n.key || n.id, { ...n, genre: genre.name });
+    }
+  }
+  return [...merged.values()];
+}
+
 async function creatorNotes(urlname, pages) {
   if (DEMO) return demoNotes(urlname, pages * PAGE_SIZE, urlname);
   const out = [];
@@ -155,6 +184,14 @@ const server = http.createServer(async (req, res) => {
       if (!q) return sendJson(res, 400, { error: 'キーワードを入力してください' });
       return sendJson(res, 200, { query: q, demo: DEMO, notes: await searchNotes(q, pages) });
     }
+    if (u.pathname === '/api/genres') {
+      return sendJson(res, 200, { genres: GENRES });
+    }
+    if (u.pathname === '/api/genre') {
+      const genre = GENRES.find((g) => g.id === u.searchParams.get('id'));
+      if (!genre) return sendJson(res, 400, { error: 'ジャンルが見つかりません' });
+      return sendJson(res, 200, { query: genre.name, demo: DEMO, notes: await genreNotes(genre, pages) });
+    }
     if (u.pathname === '/api/creator') {
       const id = (u.searchParams.get('id') || '').trim().replace(/^https?:\/\/note\.com\//, '').replace(/\/.*$/, '');
       if (!/^[A-Za-z0-9_-]+$/.test(id)) return sendJson(res, 400, { error: 'クリエイターID（note.com/xxxx の xxxx）を入力してください' });
@@ -173,4 +210,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { normalizeNote, server };
+module.exports = { normalizeNote, server, GENRES };

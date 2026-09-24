@@ -15,6 +15,10 @@ const PRICE_BANDS = [
 
 let allNotes = [];
 let view = [];
+let mode = 'genre';
+let genres = [];
+let rankingNotes = [];
+let busy = false;
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -34,35 +38,64 @@ function enrich(n) {
   return { ...n, published, ageDays, velocity };
 }
 
-async function runSearch(e) {
-  e.preventDefault();
-  const mode = document.querySelector('input[name="mode"]:checked').value;
-  const pages = $('pages').value;
-  const terms = $('q').value.split(/[,、，]/).map((s) => s.trim()).filter(Boolean);
-  if (!terms.length) return;
-
-  $('go').disabled = true;
+// requests: [{ label, url }] を順に取得し、記事をキーで重複排除してまとめる
+async function loadNotes(requests) {
   const merged = new Map();
   let demo = false;
-  try {
-    for (const [i, term] of terms.entries()) {
-      setStatus(`取得中… 「${term}」 (${i + 1}/${terms.length})`);
-      const param = mode === 'creator' ? 'id' : 'q';
-      const res = await fetch(`/api/${mode}?${param}=${encodeURIComponent(term)}&pages=${pages}`);
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-      demo = demo || body.demo;
-      for (const n of body.notes) merged.set(n.key || n.id, enrich(n));
+  for (const [i, r] of requests.entries()) {
+    setStatus(`取得中… 「${r.label}」 (${i + 1}/${requests.length})`);
+    const res = await fetch(r.url);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    demo = demo || body.demo;
+    for (const n of body.notes) {
+      const k = n.key || n.id;
+      if (!merged.has(k)) merged.set(k, enrich(n));
     }
-    allNotes = [...merged.values()];
-    setStatus(`${allNotes.length}件の記事を取得しました${demo ? '（デモデータ）' : ''}`);
-    $('results').hidden = false;
-    render();
+  }
+  return { notes: [...merged.values()], demo };
+}
+
+async function withBusy(fn) {
+  if (busy) return;
+  busy = true;
+  document.querySelectorAll('#go, #rkBuild, #genreChips button').forEach((b) => { b.disabled = true; });
+  try {
+    await fn();
   } catch (err) {
     setStatus(`エラー: ${err.message}`, true);
   } finally {
-    $('go').disabled = false;
+    busy = false;
+    document.querySelectorAll('#go, #rkBuild, #genreChips button').forEach((b) => { b.disabled = false; });
   }
+}
+
+function showResults(notes, demo, label) {
+  allNotes = notes;
+  setStatus(`${label}: ${allNotes.length}件の記事を取得しました${demo ? '（デモデータ）' : ''}`);
+  $('results').hidden = false;
+  render();
+}
+
+function runSearch(e) {
+  e.preventDefault();
+  const terms = $('q').value.split(/[,、，]/).map((s) => s.trim()).filter(Boolean);
+  if (!terms.length) return;
+  const pages = $('pages').value;
+  const param = mode === 'creator' ? 'id' : 'q';
+  withBusy(async () => {
+    const { notes, demo } = await loadNotes(terms.map((t) => ({ label: t, url: `/api/${mode}?${param}=${encodeURIComponent(t)}&pages=${pages}` })));
+    showResults(notes, demo, terms.join('、'));
+  });
+}
+
+function runGenre(genre) {
+  document.querySelectorAll('#genreChips button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.id === genre.id)));
+  withBusy(async () => {
+    const pages = $('genrePages').value;
+    const { notes, demo } = await loadNotes([{ label: genre.name, url: `/api/genre?id=${genre.id}&pages=${pages}` }]);
+    showResults(notes, demo, genre.name);
+  });
 }
 
 function currentFilters() {
@@ -165,7 +198,7 @@ function renderTags() {
     ? top.map(([t, c]) => `<li><button type="button" class="tag" data-tag="${escapeHtml(t)}">#${escapeHtml(t)}</button><span>${c.count}件 · 平均スキ ${num(c.likes / c.count)}</span></li>`).join('')
     : '<li class="muted">ハッシュタグ情報がありません</li>';
   $('tagRank').querySelectorAll('button.tag').forEach((b) => b.addEventListener('click', () => {
-    document.querySelector('input[name="mode"][value="search"]').checked = true;
+    setMode('search');
     $('q').value = b.dataset.tag;
     $('searchForm').requestSubmit();
   }));
@@ -190,7 +223,7 @@ function renderTable() {
   $('rows').innerHTML = view.slice(0, 500).map((n, i) => `
     <tr>
       <td class="num">${i + 1}</td>
-      <td class="title"><a href="${escapeHtml(n.url)}" target="_blank" rel="noopener">${escapeHtml(n.title)}</a>${n.isMagazineOnly ? '<span class="badge">マガジン限定</span>' : ''}</td>
+      <td class="title"><a href="${escapeHtml(n.url)}" target="_blank" rel="noopener">${escapeHtml(n.title)}</a>${n.genre ? `<span class="badge">${escapeHtml(n.genre)}</span>` : ''}${n.isMagazineOnly ? '<span class="badge">マガジン限定</span>' : ''}</td>
       <td>${escapeHtml(n.creator.name)}<br><span class="muted">フォロワー ${num(n.creator.followers)}</span></td>
       <td class="num">${n.isPaid ? yen(n.price) : '無料'}</td>
       <td class="num">${num(n.likes)}</td>
@@ -225,8 +258,130 @@ function hideTip() { $('tooltip').hidden = true; }
 $('searchForm').addEventListener('submit', runSearch);
 ['paidOnly', 'minPrice', 'maxPrice', 'minLikes', 'period', 'sort', 'ratio'].forEach((id) => $(id).addEventListener('input', () => allNotes.length && render()));
 $('csv').addEventListener('click', downloadCsv);
-document.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener('change', () => {
-  $('q').placeholder = r.value === 'creator' && r.checked
+
+// ---- モード切り替え ----
+function setMode(next) {
+  mode = next;
+  document.querySelectorAll('.tabs [role="tab"]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.mode === mode)));
+  $('genrePanel').hidden = mode !== 'genre';
+  $('searchForm').hidden = mode !== 'search' && mode !== 'creator';
+  $('rankingPanel').hidden = mode !== 'ranking';
+  $('ranking').hidden = mode !== 'ranking' || !rankingNotes.length;
+  $('results').hidden = mode === 'ranking' || !allNotes.length;
+  $('q').placeholder = mode === 'creator'
     ? '例: note.com/xxxx の xxxx（カンマ区切りで複数可）'
     : '例: 副業, ChatGPT, 投資（カンマ区切りで複数可）';
-}));
+  setStatus('');
+}
+document.querySelectorAll('.tabs [role="tab"]').forEach((t) => t.addEventListener('click', () => setMode(t.dataset.mode)));
+
+// ---- ジャンル ----
+async function loadGenres() {
+  try {
+    const res = await fetch('/api/genres');
+    genres = (await res.json()).genres || [];
+  } catch {
+    genres = [];
+  }
+  $('genreChips').innerHTML = genres.map((g) => `
+    <button type="button" class="chip" data-id="${g.id}" aria-pressed="false">
+      <span class="chip-name">${escapeHtml(g.name)}</span>
+      <span class="chip-kw">${g.keywords.map(escapeHtml).join(' / ')}</span>
+    </button>`).join('') || '<p class="muted">ジャンル一覧を読み込めませんでした</p>';
+  $('genreChips').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => runGenre(genres.find((g) => g.id === b.dataset.id))));
+  $('rkGenreFilter').innerHTML = '<option value="">すべて</option>' + genres.map((g) => `<option>${escapeHtml(g.name)}</option>`).join('');
+}
+
+// ---- ランキング ----
+const METRICS = {
+  revenue: { label: '推定売上合計', note: (n) => n.revenue, fmt: yen },
+  likes: { label: '平均スキ', note: (n) => n.likes, fmt: num },
+  velocity: { label: '平均スキ/日', note: (n) => n.velocity, fmt: (v) => v.toFixed(2) },
+};
+
+function buildRanking() {
+  withBusy(async () => {
+    // 全ジャンル × 各キーワード 1 ページずつ（サーバー側で 1 秒間隔に制限される）
+    const { notes, demo } = await loadNotes(genres.map((g) => ({ label: g.name, url: `/api/genre?id=${g.id}&pages=1` })));
+    rankingNotes = notes.filter((n) => n.isPaid).map((n) => ({ ...n, revenue: n.price * n.likes }));
+    setStatus(`${genres.length}ジャンル・有料記事${rankingNotes.length}件からランキングを作成しました${demo ? '（デモデータ）' : ''}`);
+    $('ranking').hidden = false;
+    renderRanking();
+  });
+}
+
+const MEDALS = ['🥇', '🥈', '🥉'];
+const rankCell = (i) => `<td class="num rk-pos">${MEDALS[i] || i + 1}</td>`;
+
+function renderRanking() {
+  const period = Number($('rkPeriod').value) || 0;
+  const metricKey = $('rkMetric').value;
+  const metric = METRICS[metricKey];
+  const inPeriod = rankingNotes.filter((n) => !period || (n.ageDays !== null && n.ageDays <= period));
+
+  // ジャンル別
+  const byGenre = genres.map((g) => {
+    const items = inPeriod.filter((n) => n.genre === g.name);
+    const sum = (f) => items.reduce((s, n) => s + f(n), 0);
+    const avg = (f) => (items.length ? sum(f) / items.length : 0);
+    return {
+      genre: g,
+      count: items.length,
+      medianPrice: median(items.map((n) => n.price)),
+      avgLikes: avg((n) => n.likes),
+      avgVelocity: avg((n) => n.velocity),
+      value: metricKey === 'revenue' ? sum((n) => n.revenue) : avg(metric.note),
+    };
+  }).sort((a, b) => b.value - a.value);
+  const max = Math.max(1, ...byGenre.map((r) => r.value));
+  $('rkGenreMetric').textContent = metric.label;
+  $('rkGenreRows').innerHTML = byGenre.map((r, i) => `
+    <tr>
+      ${rankCell(i)}
+      <td><button type="button" class="link" data-id="${r.genre.id}">${escapeHtml(r.genre.name)}</button></td>
+      <td class="num">${num(r.count)}</td>
+      <td class="num">${r.count ? yen(r.medianPrice) : '—'}</td>
+      <td class="num">${num(r.avgLikes)}</td>
+      <td class="num">${r.avgVelocity.toFixed(2)}</td>
+      <td class="bar-col"><span class="mini-bar"><span style="width:${(r.value / max) * 100}%"></span></span><span class="mini-val">${metric.fmt(r.value)}</span></td>
+    </tr>`).join('');
+  $('rkGenreRows').querySelectorAll('button.link').forEach((b) => b.addEventListener('click', () => {
+    setMode('genre');
+    runGenre(genres.find((g) => g.id === b.dataset.id));
+  }));
+
+  // 記事
+  const genreFilter = $('rkGenreFilter').value;
+  const topNotes = inPeriod.filter((n) => !genreFilter || n.genre === genreFilter)
+    .sort((a, b) => metric.note(b) - metric.note(a)).slice(0, 30);
+  $('rkNoteRows').innerHTML = topNotes.map((n, i) => `
+    <tr>
+      ${rankCell(i)}
+      <td class="title"><a href="${escapeHtml(n.url)}" target="_blank" rel="noopener">${escapeHtml(n.title)}</a></td>
+      <td><span class="badge">${escapeHtml(n.genre || '')}</span></td>
+      <td>${escapeHtml(n.creator.name)}</td>
+      <td class="num">${yen(n.price)}</td>
+      <td class="num">${num(n.likes)}</td>
+      <td class="num">${n.velocity.toFixed(2)}</td>
+      <td class="num">${yen(n.revenue)}</td>
+    </tr>`).join('') || '<tr><td colspan="8" class="muted">該当する有料記事がありません</td></tr>';
+
+  // クリエイター
+  const byCreator = new Map();
+  for (const n of inPeriod) {
+    const k = n.creator.urlname || n.creator.name;
+    const c = byCreator.get(k) || { ...n.creator, revenue: 0, likes: 0, count: 0, genres: new Map() };
+    c.revenue += n.revenue; c.likes += n.likes; c.count++; c.genres.set(n.genre, (c.genres.get(n.genre) || 0) + 1);
+    byCreator.set(k, c);
+  }
+  const topCreators = [...byCreator.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 10);
+  $('rkCreators').innerHTML = topCreators.map((c) => `
+    <li><a href="https://note.com/${encodeURIComponent(c.urlname)}" target="_blank" rel="noopener">${escapeHtml(c.name)}</a>
+    <span>${[...c.genres].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([g]) => escapeHtml(g)).join('・')}${c.genres.size > 2 ? ' ほか' : ''} · ${c.count}本 · ${yen(c.revenue)}</span></li>`).join('') || '<li class="muted">該当なし</li>';
+}
+
+$('rkBuild').addEventListener('click', buildRanking);
+['rkPeriod', 'rkMetric', 'rkGenreFilter'].forEach((id) => $(id).addEventListener('input', () => rankingNotes.length && renderRanking()));
+
+loadGenres();
+setMode('genre');
