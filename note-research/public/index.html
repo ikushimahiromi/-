@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>note 売れ筋リサーチ</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>note 売れ筋リサーチ</h1>
+    <p class="sub">ジャンル・キーワード・クリエイターから、売れている有料noteを調べます</p>
+  </header>
+
+  <main>
+    <nav class="tabs" role="tablist" aria-label="モード">
+      <button type="button" role="tab" data-mode="genre" aria-selected="true">ジャンル</button>
+      <button type="button" role="tab" data-mode="ranking" aria-selected="false">ランキング</button>
+      <button type="button" role="tab" data-mode="search" aria-selected="false">キーワード</button>
+      <button type="button" role="tab" data-mode="creator" aria-selected="false">クリエイター</button>
+    </nav>
+
+    <div id="genrePanel" class="panel">
+      <div class="panel-head">
+        <h2>ジャンルを選んで売れ筋を調べる</h2>
+        <label class="inline">取得件数
+          <select id="genrePages">
+            <option value="1">少なめ（速い）</option>
+            <option value="2" selected>ふつう</option>
+            <option value="4">多め（遅い）</option>
+          </select>
+        </label>
+      </div>
+      <div class="chips" id="genreChips"></div>
+    </div>
+
+    <form id="searchForm" class="panel search" hidden>
+      <input id="q" type="text" placeholder="例: 副業, ChatGPT, 投資（カンマ区切りで複数可）" autocomplete="off" required>
+      <label class="inline">取得件数
+        <select id="pages">
+          <option value="1">20件</option>
+          <option value="3" selected>60件</option>
+          <option value="5">100件</option>
+          <option value="10">200件</option>
+        </select>
+      </label>
+      <button type="submit" id="go">調べる</button>
+    </form>
+
+    <div id="rankingPanel" class="panel filters" hidden>
+      <label class="inline">集計期間
+        <select id="rkPeriod">
+          <option value="30">30日以内</option>
+          <option value="90" selected>90日以内</option>
+          <option value="365">1年以内</option>
+          <option value="0">全期間</option>
+        </select>
+      </label>
+      <label class="inline">ランキング基準
+        <select id="rkMetric">
+          <option value="score">総合スコア</option>
+          <option value="revenue">推定売上</option>
+          <option value="recent">直近の伸び</option>
+          <option value="likes">スキ数</option>
+          <option value="velocity">勢い（スキ/日）</option>
+        </select>
+      </label>
+      <button type="button" id="rkBuild">ランキングを作成</button>
+      <span class="muted">全ジャンルを調べるので1分ほどかかります</span>
+    </div>
+
+    <p id="status" class="status" role="status"></p>
+
+    <details class="panel weights" id="weightsPanel">
+      <summary>総合スコアの配分 <span class="muted">— 何を重視して「売れている」と判断するか</span></summary>
+      <div class="weights-grid">
+        <label>累計スキ <input type="number" id="wLikes" min="0" max="100" step="5" value="35"></label>
+        <label>直近の伸び <input type="number" id="wRecent" min="0" max="100" step="5" value="35"></label>
+        <label>反応率 <input type="number" id="wEngage" min="0" max="100" step="5" value="15"></label>
+        <label>価格 <input type="number" id="wPrice" min="0" max="100" step="5" value="15"></label>
+      </div>
+      <ul class="note-text">
+        <li><b>累計スキ</b>: 記事についたスキの合計。</li>
+        <li><b>直近の伸び</b>: 直近7日間に増えたスキ（1日あたり）。このアプリが取得するたびにスキ数を記録して差を出すため、2回目以降の取得から表示されます。記録が無い記事は「公開からのスキ/日」で代用します。</li>
+        <li><b>反応率</b>: フォロワー数に対するスキの割合。noteの閲覧数（PV）は著者本人しか見られないため、その代わりの指標です。フォロワーが少ないのにスキが多い記事ほど高くなります。</li>
+        <li><b>価格</b>: 同じスキ数なら高い記事ほど売上が大きいため。</li>
+        <li>各指標を「集めた記事の中で上位何%か」に直して配分どおりに合算し、0〜100点にします。スコアにマウスを乗せると内訳が見られます。</li>
+      </ul>
+    </details>
+
+    <section id="results" hidden>
+      <div class="panel filters">
+        <label><input type="checkbox" id="paidOnly" checked> 有料のみ</label>
+        <label class="inline">価格 <input type="number" id="minPrice" min="0" step="100" placeholder="下限">〜<input type="number" id="maxPrice" min="0" step="100" placeholder="上限">円</label>
+        <label class="inline">スキ <input type="number" id="minLikes" min="0" step="10" placeholder="0">以上</label>
+        <label class="inline">期間
+          <select id="period">
+            <option value="0">すべて</option>
+            <option value="30">30日以内</option>
+            <option value="90">90日以内</option>
+            <option value="180">半年以内</option>
+            <option value="365">1年以内</option>
+          </select>
+        </label>
+        <label class="inline">並び替え
+          <select id="sort">
+            <option value="score">総合スコア順</option>
+            <option value="revenue">推定売上順</option>
+            <option value="recent">直近の伸び順</option>
+            <option value="likes">スキ順</option>
+            <option value="velocity">勢い順（スキ/日）</option>
+            <option value="price">価格順</option>
+            <option value="date">新着順</option>
+          </select>
+        </label>
+        <label class="inline" title="スキ1件あたり何件売れていると仮定するか">購入率係数
+          <input type="number" id="ratio" min="0.1" max="10" step="0.1" value="1">
+        </label>
+      </div>
+
+      <div class="tiles" id="tiles"></div>
+
+      <div class="grid2">
+        <figure class="panel chart">
+          <figcaption>価格帯別 — 記事数</figcaption>
+          <div class="bars" id="chartCount"></div>
+        </figure>
+        <figure class="panel chart">
+          <figcaption>価格帯別 — 平均スキ数</figcaption>
+          <div class="bars" id="chartLikes"></div>
+        </figure>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <h2>よく使われるハッシュタグ</h2>
+          <ol class="rank" id="tagRank"></ol>
+        </div>
+        <div class="panel">
+          <h2>売れているクリエイター</h2>
+          <ol class="rank" id="creatorRank"></ol>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="table-head">
+          <h2>記事一覧 <span id="count" class="muted"></span></h2>
+          <button type="button" id="csv" class="ghost">CSVダウンロード</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>#</th><th>タイトル</th><th>クリエイター</th><th class="num">価格</th><th class="num">スキ</th><th class="num">直近スキ</th><th class="num">推定売上</th><th class="num">総合</th><th>公開日</th></tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <p class="note-text">
+        ※ noteは購入数を公開していないため、「推定売上」は <b>価格 × スキ数 × 購入率係数</b> で出した目安です。実際の売上とは異なります。
+      </p>
+    </section>
+    <section id="ranking" hidden>
+      <div class="panel">
+        <h2>ジャンル別ランキング</h2>
+        <div class="table-wrap">
+          <table class="rk-genre">
+            <thead><tr><th class="num">順位</th><th>ジャンル</th><th class="num">有料記事</th><th class="num">中央価格</th><th class="num">平均スキ</th><th class="num">勢い</th><th class="bar-col" id="rkGenreMetric">推定売上合計</th></tr></thead>
+            <tbody id="rkGenreRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="table-head">
+          <h2>売れ筋note ランキング</h2>
+          <label class="inline">ジャンル
+            <select id="rkGenreFilter"><option value="">すべて</option></select>
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="num">順位</th><th>タイトル</th><th>ジャンル</th><th>クリエイター</th><th class="num">価格</th><th class="num">スキ</th><th class="num">直近スキ</th><th class="num">推定売上</th><th class="num">総合</th></tr></thead>
+            <tbody id="rkNoteRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>売れ筋クリエイター ランキング</h2>
+        <ol class="rank" id="rkCreators"></ol>
+      </div>
+
+      <p class="note-text">
+        ※ 有料記事のみを集計しています。noteは購入数を公開していないため、「推定売上」は <b>価格 × スキ数</b> で出した目安です（有料記事のスキは購入者が付けることが多いため、売れ行きの目安になります）。
+      </p>
+    </section>
+  </main>
+
+  <div id="tooltip" class="tooltip" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
