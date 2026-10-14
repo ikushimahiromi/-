@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>note売れ筋レーダー</title>
+  <meta name="description" content="直近24時間に公開された有料noteを、スキの伸びから「売れ筋」順に探せるツール">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&family=Dela+Gothic+One&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23111'/%3E%3Cpath d='M20 20l24 24M44 20L20 44' stroke='%23ffc400' stroke-width='8' stroke-linecap='round'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="hero">
+    <div class="hero__spikes" aria-hidden="true"></div>
+    <div class="hero__inner">
+      <div class="logo">
+        <span class="logo__mark" aria-hidden="true"><span>✕</span><span>○</span></span>
+        <div>
+          <h1 class="logo__title">note売れ筋レーダー</h1>
+          <p class="logo__sub">24時間以内に出た有料noteから、いま伸びてるヤツだけ見せる。</p>
+        </div>
+      </div>
+      <div class="hero__meta">
+        <span id="dataBadge" class="badge">読み込み中…</span>
+        <span id="updatedAt" class="muted"></span>
+        <button id="themeBtn" class="icon-btn" type="button" aria-label="ダーク/ライト切替">◐</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="kpis" id="kpis" aria-label="サマリー"></section>
+
+    <section class="panel controls" aria-label="検索条件">
+      <div class="search">
+        <span class="search__icon" aria-hidden="true">⌕</span>
+        <input id="q" type="search" placeholder="キーワード・作者・#タグで検索（例: ChatGPT 副業）" autocomplete="off">
+        <button id="resetBtn" class="btn btn--ghost" type="button">リセット</button>
+      </div>
+
+      <div class="filters">
+        <div class="filter">
+          <span class="filter__label">公開から</span>
+          <div class="chips" id="windowChips" role="group" aria-label="公開からの時間">
+            <button data-v="3">3h</button><button data-v="6">6h</button><button data-v="12">12h</button><button data-v="24" class="on">24h</button>
+          </div>
+        </div>
+        <div class="filter">
+          <span class="filter__label">価格</span>
+          <div class="chips" id="priceChips" role="group" aria-label="価格帯">
+            <button data-v="all" class="on">すべて</button><button data-v="0-500">〜500</button><button data-v="501-1000">〜1,000</button><button data-v="1001-3000">〜3,000</button><button data-v="3001-9999999">3,001〜</button>
+          </div>
+        </div>
+        <div class="filter">
+          <label class="filter__label" for="genre">ジャンル</label>
+          <select id="genre"><option value="">すべて</option></select>
+        </div>
+        <div class="filter">
+          <label class="filter__label" for="minLikes">スキ <b id="minLikesVal">0</b> 以上</label>
+          <input id="minLikes" type="range" min="0" max="100" step="1" value="0">
+        </div>
+        <div class="filter">
+          <label class="filter__label" for="sort">並び順</label>
+          <select id="sort">
+            <option value="heat">🔥 勢いスコア</option>
+            <option value="gain3h">⤴ 直近3hのスキ増加</option>
+            <option value="likesPerHour">⏱ 1時間あたりスキ</option>
+            <option value="likes">♥ スキ数</option>
+            <option value="revenueIndex">¥ スキ×価格</option>
+            <option value="priceDesc">価格が高い順</option>
+            <option value="priceAsc">価格が安い順</option>
+            <option value="new">新着順</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <label class="toggle"><input type="checkbox" id="onlyMaru"> <span>○ 保存したものだけ</span></label>
+        <label class="toggle"><input type="checkbox" id="showBatsu"> <span>✕ 非表示にしたものも出す</span></label>
+        <span class="toolbar__spacer"></span>
+        <div class="seg" role="group" aria-label="表示切替">
+          <button id="viewCard" class="on" type="button">カード</button>
+          <button id="viewTable" type="button">表</button>
+        </div>
+        <button id="shareBtn" class="btn btn--ghost" type="button">条件をコピー</button>
+        <button id="csvBtn" class="btn" type="button">CSV出力</button>
+      </div>
+    </section>
+
+    <div class="layout">
+      <section class="results" aria-live="polite">
+        <div class="results__head">
+          <h2 class="section-title"><span class="tag-x">✕</span>売れ筋ランキング</h2>
+          <span id="resultCount" class="muted"></span>
+        </div>
+        <div id="list"></div>
+        <button id="moreBtn" class="btn btn--wide" type="button" hidden>もっと見る</button>
+      </section>
+
+      <aside class="side">
+        <section class="panel">
+          <h3 class="side-title">ジャンル別の勢い</h3>
+          <div id="genreChart" class="bars"></div>
+        </section>
+        <section class="panel">
+          <h3 class="side-title">急上昇ハッシュタグ</h3>
+          <div id="tagCloud" class="tagcloud"></div>
+        </section>
+        <section class="panel">
+          <h3 class="side-title">価格帯の分布</h3>
+          <div id="priceChart" class="bars"></div>
+        </section>
+        <section class="panel">
+          <h3 class="side-title">公開時間帯（JST）</h3>
+          <div id="hourChart" class="hours"></div>
+          <p class="note-text" id="hourNote"></p>
+        </section>
+        <section class="panel">
+          <h3 class="side-title">注目クリエイター</h3>
+          <ol id="creators" class="creators"></ol>
+        </section>
+      </aside>
+    </div>
+
+    <section class="panel howto">
+      <h2 class="section-title"><span class="tag-o">○</span>このツールの見方</h2>
+      <div class="howto__grid">
+        <div>
+          <h4>「売れてる」の決め方</h4>
+          <p>noteは販売数を公開していません。そこで <b>有料note</b> だけに絞り、<b>スキの集まる速さ</b> を「売れ筋」の目安にしています。有料noteのスキは購入者が押すことが多いため、売れ行きと連動しやすい指標です。</p>
+        </div>
+        <div>
+          <h4>🔥 勢いスコア</h4>
+          <p>（1時間あたりのスキ × 0.6 ＋ 直近3時間のスキ増加ペース × 0.4）× 価格の重み × 10。高単価ほど1スキの重みが大きくなります。</p>
+        </div>
+        <div>
+          <h4>¥ スキ×価格</h4>
+          <p>スキ数に価格をかけた指数です。売上の「大きさの目安」で、実際の売上額ではありません。</p>
+        </div>
+        <div>
+          <h4>○ と ✕</h4>
+          <p>○で気になるnoteを保存、✕で興味のないnoteを非表示にできます。この設定はお使いのブラウザにだけ保存されます。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="detail" class="detail">
+    <form method="dialog"><button class="detail__close" aria-label="閉じる">✕</button></form>
+    <div id="detailBody"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <footer class="footer">
+    <p>データ: note.com の公開情報（非公式API）を1時間ごとに収集。note株式会社とは関係ありません。</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

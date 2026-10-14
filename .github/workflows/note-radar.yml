@@ -1,0 +1,58 @@
+name: note-radar
+
+on:
+  schedule:
+    - cron: "7 * * * *" # 毎時7分（UTC）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: note-radar
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: note.com から有料noteを収集
+        run: python note-radar/scripts/fetch_notes.py
+
+      - name: データをコミット
+        run: |
+          git config user.name "note-radar-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add note-radar/data
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "note-radar: データ更新 $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: note-radar
+
+  deploy:
+    needs: update
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
