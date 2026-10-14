@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>note売れ筋レーダー</title>
-  <meta name="description" content="直近24時間に公開された有料noteを、スキの伸びから「売れ筋」順に探せるツール">
+  <meta name="description" content="直近24時間で売れている有料noteを、テーマ別に探せるツール">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&family=Dela+Gothic+One&display=swap" rel="stylesheet">
@@ -19,7 +19,7 @@
         <span class="logo__mark" aria-hidden="true"><span>✕</span><span>○</span></span>
         <div>
           <h1 class="logo__title">note売れ筋レーダー</h1>
-          <p class="logo__sub">24時間以内に出た有料noteから、いま伸びてるヤツだけ見せる。</p>
+          <p class="logo__sub">24時間以内に売れた有料noteだけ、テーマ別に見せる。</p>
         </div>
       </div>
       <div class="hero__meta">
@@ -30,7 +30,13 @@
     </div>
   </header>
 
+  <nav class="themes" aria-label="テーマ">
+    <div class="themes__inner" id="themeTabs" role="tablist"></div>
+  </nav>
+
   <main class="wrap">
+    <div id="notice" class="notice" hidden></div>
+    <section id="themeHead" class="theme-head" aria-live="polite"></section>
     <section class="kpis" id="kpis" aria-label="サマリー"></section>
 
     <section class="panel controls" aria-label="検索条件">
@@ -42,10 +48,19 @@
 
       <div class="filters">
         <div class="filter">
-          <span class="filter__label">公開から</span>
-          <div class="chips" id="windowChips" role="group" aria-label="公開からの時間">
-            <button data-v="3">3h</button><button data-v="6">6h</button><button data-v="12">12h</button><button data-v="24" class="on">24h</button>
+          <span class="filter__label">この時間内に売れた</span>
+          <div class="chips" id="windowChips" role="group" aria-label="売れた期間">
+            <button data-v="1">1h</button><button data-v="3">3h</button><button data-v="6">6h</button><button data-v="24" class="on">24h</button>
           </div>
+        </div>
+        <div class="filter">
+          <label class="filter__label" for="published">公開日</label>
+          <select id="published">
+            <option value="0">いつでも</option>
+            <option value="24">24時間以内</option>
+            <option value="168">7日以内</option>
+            <option value="720">30日以内</option>
+          </select>
         </div>
         <div class="filter">
           <span class="filter__label">価格</span>
@@ -54,21 +69,18 @@
           </div>
         </div>
         <div class="filter">
-          <label class="filter__label" for="genre">ジャンル</label>
-          <select id="genre"><option value="">すべて</option></select>
-        </div>
-        <div class="filter">
-          <label class="filter__label" for="minLikes">スキ <b id="minLikesVal">0</b> 以上</label>
-          <input id="minLikes" type="range" min="0" max="100" step="1" value="0">
+          <label class="filter__label" for="minLikes">期間内のスキ増加 <b id="minLikesVal">1</b> 以上</label>
+          <input id="minLikes" type="range" min="1" max="50" step="1" value="1">
         </div>
         <div class="filter">
           <label class="filter__label" for="sort">並び順</label>
           <select id="sort">
             <option value="heat">🔥 勢いスコア</option>
+            <option value="gain24h">🛒 24hで売れた数（スキ増）</option>
             <option value="gain3h">⤴ 直近3hのスキ増加</option>
-            <option value="likesPerHour">⏱ 1時間あたりスキ</option>
-            <option value="likes">♥ スキ数</option>
-            <option value="revenueIndex">¥ スキ×価格</option>
+            <option value="gain1h">⚡ 直近1hのスキ増加</option>
+            <option value="salesIndex">¥ 24h増加×価格</option>
+            <option value="likes">♥ スキ累計</option>
             <option value="priceDesc">価格が高い順</option>
             <option value="priceAsc">価格が安い順</option>
             <option value="new">新着順</option>
@@ -92,7 +104,7 @@
     <div class="layout">
       <section class="results" aria-live="polite">
         <div class="results__head">
-          <h2 class="section-title"><span class="tag-x">✕</span>売れ筋ランキング</h2>
+          <h2 class="section-title"><span class="tag-x">✕</span><span id="rankTitle">売れ筋ランキング</span></h2>
           <span id="resultCount" class="muted"></span>
         </div>
         <div id="list"></div>
@@ -101,8 +113,8 @@
 
       <aside class="side">
         <section class="panel">
-          <h3 class="side-title">ジャンル別の勢い</h3>
-          <div id="genreChart" class="bars"></div>
+          <h3 class="side-title">テーマ別の売れ行き（24h）</h3>
+          <div id="themeChart" class="bars"></div>
         </section>
         <section class="panel">
           <h3 class="side-title">急上昇ハッシュタグ</h3>
@@ -113,7 +125,7 @@
           <div id="priceChart" class="bars"></div>
         </section>
         <section class="panel">
-          <h3 class="side-title">公開時間帯（JST）</h3>
+          <h3 class="side-title">売れた記事の公開時間帯（JST）</h3>
           <div id="hourChart" class="hours"></div>
           <p class="note-text" id="hourNote"></p>
         </section>
@@ -129,15 +141,15 @@
       <div class="howto__grid">
         <div>
           <h4>「売れてる」の決め方</h4>
-          <p>noteは販売数を公開していません。そこで <b>有料note</b> だけに絞り、<b>スキの集まる速さ</b> を「売れ筋」の目安にしています。有料noteのスキは購入者が押すことが多いため、売れ行きと連動しやすい指標です。</p>
+          <p>noteは販売数を公開していません。そこで <b>有料note</b> のスキ数を1時間ごとに記録し、<b>直近24時間でスキが増えたものだけ</b> を「売れた」として表示しています。公開日は問わないので、前から売れ続けている記事も出ます。</p>
         </div>
         <div>
           <h4>🔥 勢いスコア</h4>
-          <p>（1時間あたりのスキ × 0.6 ＋ 直近3時間のスキ増加ペース × 0.4）× 価格の重み × 10。高単価ほど1スキの重みが大きくなります。</p>
+          <p>（24時間のスキ増加 ＋ 直近3時間のスキ増加 × 3）× 価格の重み。いま伸びているものほど上に来て、高単価ほど1スキの重みが大きくなります。</p>
         </div>
         <div>
-          <h4>¥ スキ×価格</h4>
-          <p>スキ数に価格をかけた指数です。売上の「大きさの目安」で、実際の売上額ではありません。</p>
+          <h4>テーマ</h4>
+          <p>上のタブでテーマを切り替えられます。テーマは記事のタイトルとハッシュタグから自動で判定しています。テーマやキーワードは <code>themes.json</code> で追加・変更できます。</p>
         </div>
         <div>
           <h4>○ と ✕</h4>

@@ -1,27 +1,32 @@
 /* note売れ筋レーダー
  * data/latest.json（GitHub Actions が1時間ごとに更新）を読み込み、
- * 絞り込み・並べ替え・集計をすべてブラウザ側で行う。
+ * テーマ切り替え・絞り込み・並べ替え・集計をすべてブラウザ側で行う。
+ * latest.json に入っているのは「直近24時間でスキが増えた有料note」だけ。
  */
 (() => {
   "use strict";
 
   const PAGE = 30;
   const REFRESH_MS = 10 * 60 * 1000;
+  const WINDOWS = [1, 3, 6, 24];
   const STORE = { maru: "nr:maru", batsu: "nr:batsu", theme: "nr:theme", view: "nr:view" };
+  const ALL = { id: "", name: "すべて", emoji: "✕○" };
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
 
   const state = {
     notes: [],
+    themes: [],
     meta: null,
     demo: false,
     shown: PAGE,
+    theme: "",
     q: "",
     window: 24,
+    published: 0,
     price: "all",
-    genre: "",
-    minLikes: 0,
+    minGain: 1,
     sort: "heat",
     onlyMaru: false,
     showBatsu: false,
@@ -48,6 +53,8 @@
   const yen = (n) => "¥" + Number(n || 0).toLocaleString("ja-JP");
   const num = (n) => Number(n || 0).toLocaleString("ja-JP");
   const safeUrl = (u) => (typeof u === "string" && /^https:\/\//.test(u) ? u : "");
+  const gainOf = (n, h = state.window) => n[`gain${h}h`] ?? 0;
+  const themeById = (id) => state.themes.find((t) => t.id === id);
 
   function hoursSince(iso) {
     return Math.max((Date.now() - new Date(iso).getTime()) / 3600000, 0);
@@ -55,7 +62,8 @@
   function ago(iso) {
     const h = hoursSince(iso);
     if (h < 1) return `${Math.max(1, Math.round(h * 60))}分前`;
-    return `${Math.floor(h)}時間前`;
+    if (h < 48) return `${Math.floor(h)}時間前`;
+    return `${Math.floor(h / 24)}日前`;
   }
   function jstHour(iso) {
     return (new Date(iso).getUTCHours() + 9) % 24;
@@ -74,51 +82,76 @@
   }
 
   // ---------- データ読み込み ----------
+  async function getJson(path) {
+    const res = await fetch(`${path}?t=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`${path}: ${res.status}`);
+    return res.json();
+  }
+
   async function fetchData() {
+    let themes = [];
+    try { themes = await getJson("themes.json"); } catch (_) { /* latest.json 側の定義を使う */ }
     try {
-      const res = await fetch(`data/latest.json?t=${Date.now()}`, { cache: "no-store" });
-      if (!res.ok) throw new Error(res.status);
-      const json = await res.json();
-      if (!Array.isArray(json.notes) || json.notes.length === 0) throw new Error("empty");
-      state.notes = json.notes.map(enrich);
+      const json = await getJson("data/latest.json");
+      if (!Array.isArray(json.notes)) throw new Error("no notes");
       state.meta = json;
+      state.notes = json.notes.map(enrich);
       state.demo = false;
+      if (!themes.length && Array.isArray(json.themes)) themes = json.themes;
     } catch (_) {
-      const demo = makeDemo();
-      state.notes = demo.notes.map(enrich);
+      const demo = makeDemo(themes);
       state.meta = demo;
+      state.notes = demo.notes.map(enrich);
       state.demo = true;
     }
+    state.themes = themes.map(({ id, name, emoji }) => ({ id, name, emoji }));
+    if (state.theme && !themeById(state.theme)) state.theme = "";
+
     const badge = $("#dataBadge");
-    badge.textContent = state.demo ? "サンプルデータ表示中" : `有料note ${num(state.notes.length)}件を追跡中`;
+    badge.textContent = state.demo ? "サンプルデータ表示中" : `24hで売れた有料note ${num(state.notes.length)}件`;
     badge.classList.toggle("badge--demo", state.demo);
     $("#updatedAt").textContent = state.meta?.generatedAt ? `最終更新 ${fmtTime(state.meta.generatedAt)}（JST）` : "";
-    const maxLikes = Math.max(10, ...state.notes.map((n) => n.likes));
-    $("#minLikes").max = String(Math.min(500, maxLikes));
-    fillGenres();
+    renderNotice();
     render();
   }
 
   function enrich(n) {
     const tags = Array.isArray(n.hashtags) ? n.hashtags : [];
+    const themes = Array.isArray(n.themes) ? n.themes : [];
     return {
       ...n,
       hashtags: tags,
-      gain3h: n.likesGain3h ?? null,
-      gain1h: n.likesGain1h ?? null,
-      search: [n.title, n.creator?.name, n.creator?.urlname, n.genre, ...tags.map((t) => "#" + t)].join(" ").toLowerCase(),
+      themes,
+      search: [n.title, n.creator?.name, n.creator?.urlname, ...tags.map((t) => "#" + t)].join(" ").toLowerCase(),
     };
+  }
+
+  function renderNotice() {
+    const box = $("#notice");
+    const m = state.meta;
+    if (state.demo) {
+      box.innerHTML = "<b>サンプルデータを表示しています。</b> GitHub Actions がデータを集め始めると、実際の「24時間以内に売れた有料note」に切り替わります。";
+      box.hidden = false;
+      return;
+    }
+    const since = m?.trackingSince ? (new Date(m.generatedAt) - new Date(m.trackingSince)) / 3600000 : 24;
+    if (since < 24) {
+      box.innerHTML = `<b>計測を始めてから ${Math.floor(since)}時間です。</b> 24時間分の記録がそろうまでは、前から出ている記事の「売れた数」が実際より少なめに出ます。`;
+      box.hidden = false;
+    } else {
+      box.hidden = true;
+    }
   }
 
   // ---------- 絞り込み・並べ替え ----------
   function baseFiltered() {
-    // ジャンル以外の条件（サイドの集計はジャンル選択前の母集団で出す）
+    // テーマ以外の条件（テーマ別の件数はテーマ選択前の母集団で出す）
     const words = state.q.toLowerCase().split(/\s+/).filter(Boolean);
     const [pmin, pmax] = state.price === "all" ? [0, Infinity] : state.price.split("-").map(Number);
     return state.notes.filter((n) => {
-      if (hoursSince(n.publishedAt) > state.window) return false;
+      if (gainOf(n) < state.minGain) return false;
+      if (state.published && hoursSince(n.publishedAt) > state.published) return false;
       if (n.price < pmin || n.price > pmax) return false;
-      if (n.likes < state.minLikes) return false;
       if (state.onlyMaru && !state.maru.has(n.key)) return false;
       if (!state.showBatsu && state.batsu.has(n.key)) return false;
       return words.every((w) => n.search.includes(w));
@@ -127,18 +160,20 @@
 
   const SORTERS = {
     heat: (a, b) => b.heat - a.heat,
-    gain3h: (a, b) => (b.gain3h ?? -1) - (a.gain3h ?? -1) || b.heat - a.heat,
-    likesPerHour: (a, b) => b.likesPerHour - a.likesPerHour,
+    gain24h: (a, b) => b.gain24h - a.gain24h || b.heat - a.heat,
+    gain3h: (a, b) => b.gain3h - a.gain3h || b.heat - a.heat,
+    gain1h: (a, b) => b.gain1h - a.gain1h || b.heat - a.heat,
+    salesIndex: (a, b) => b.salesIndex - a.salesIndex,
     likes: (a, b) => b.likes - a.likes,
-    revenueIndex: (a, b) => b.revenueIndex - a.revenueIndex,
     priceDesc: (a, b) => b.price - a.price,
     priceAsc: (a, b) => a.price - b.price,
     new: (a, b) => new Date(b.publishedAt) - new Date(a.publishedAt),
   };
 
-  function filtered() {
-    const list = baseFiltered().filter((n) => !state.genre || n.genre === state.genre);
-    return list.sort(SORTERS[state.sort] || SORTERS.heat);
+  const inTheme = (n, id) => !id || n.themes.includes(id);
+
+  function filtered(base = baseFiltered()) {
+    return base.filter((n) => inTheme(n, state.theme)).sort(SORTERS[state.sort] || SORTERS.heat);
   }
 
   // ---------- 描画 ----------
@@ -146,27 +181,83 @@
     syncControls();
     syncUrl();
     const base = baseFiltered();
-    const list = filtered();
+    const list = filtered(base);
+    renderTabs(base);
+    renderThemeHead(base, list);
     renderKpis(list);
     renderList(list);
-    renderGenres(base);
+    renderThemeChart(base);
     renderTags(list);
     renderPrices(list);
     renderHours(list);
     renderCreators(list);
   }
 
+  function themeStats(list) {
+    const sold = list.reduce((s, n) => s + gainOf(n), 0);
+    const sales = list.reduce((s, n) => s + gainOf(n) * n.price, 0);
+    return { count: list.length, sold, sales };
+  }
+
+  function renderTabs(base) {
+    const tabs = [ALL, ...state.themes].map((t) => {
+      const count = base.filter((n) => inTheme(n, t.id)).length;
+      const on = state.theme === t.id;
+      return `<button role="tab" aria-selected="${on}" class="theme-tab ${on ? "on" : ""}" data-topic="${esc(t.id)}">
+        <span class="theme-tab__emoji">${esc(t.emoji)}</span><span>${esc(t.name)}</span><span class="theme-tab__count">${num(count)}</span>
+      </button>`;
+    });
+    $("#themeTabs").innerHTML = tabs.join("");
+    const active = $("#themeTabs .on");
+    if (active && !renderTabs.scrolled) { active.scrollIntoView({ inline: "center", block: "nearest" }); renderTabs.scrolled = true; }
+  }
+
+  function renderThemeHead(base, list) {
+    const box = $("#themeHead");
+    if (!state.theme) {
+      // 「すべて」のときはテーマごとの売れ行きカードを並べる
+      const cards = state.themes.map((t) => {
+        const items = base.filter((n) => inTheme(n, t.id));
+        const s = themeStats(items);
+        const top = items.slice().sort(SORTERS.heat)[0];
+        return { t, s, top };
+      }).sort((a, b) => b.s.sold - a.s.sold);
+      box.innerHTML = `<div class="theme-grid">${cards.map(({ t, s, top }, i) => `
+        <button class="theme-card ${i === 0 && s.sold ? "theme-card--top" : ""}" data-topic="${esc(t.id)}">
+          <span class="theme-card__emoji">${esc(t.emoji)}</span>
+          <span class="theme-card__name">${esc(t.name)}</span>
+          <span class="theme-card__num">🛒 ${num(s.sold)}<small> / ${state.window}h</small></span>
+          <span class="theme-card__sub">${num(s.count)}本が売れた${top ? `・1位「${esc(top.title.slice(0, 16))}${top.title.length > 16 ? "…" : ""}」` : ""}</span>
+        </button>`).join("")}</div>`;
+      return;
+    }
+    const t = themeById(state.theme);
+    const s = themeStats(list);
+    const tagCount = new Map();
+    list.forEach((n) => n.hashtags.forEach((h) => tagCount.set(h, (tagCount.get(h) || 0) + gainOf(n))));
+    const tags = [...tagCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+    box.innerHTML = `
+      <div class="theme-banner">
+        <span class="theme-banner__emoji">${esc(t.emoji)}</span>
+        <div class="theme-banner__body">
+          <h2>${esc(t.name)} で ${state.window}時間以内に売れたnote</h2>
+          <p>${num(s.count)}本・スキ増加 ${num(s.sold)}・増加×価格 ${yen(s.sales)}</p>
+          <div class="theme-banner__tags">${tags.map(([h]) => `<button class="hashtag" data-tag="${esc(h)}">#${esc(h)}</button>`).join("")}</div>
+        </div>
+        <button class="btn btn--ghost" data-topic="">すべてのテーマ</button>
+      </div>`;
+  }
+
   function renderKpis(list) {
+    const s = themeStats(list);
     const prices = list.map((n) => n.price).sort((a, b) => a - b);
     const median = prices.length ? prices[Math.floor(prices.length / 2)] : 0;
-    const likes = list.reduce((s, n) => s + n.likes, 0);
     const top = list.slice().sort(SORTERS.heat)[0];
-    const gains = list.filter((n) => n.gain3h != null);
-    const gainSum = gains.reduce((s, n) => s + n.gain3h, 0);
+    const fresh = list.filter((n) => hoursSince(n.publishedAt) <= 24).length;
     $("#kpis").innerHTML = [
-      kpi("該当する有料note", `${num(list.length)}件`, `直近${state.window}時間に公開`, "✕"),
-      kpi("集まったスキ", num(likes), gains.length ? `直近3時間で +${num(gainSum)}` : "1件あたり " + (list.length ? (likes / list.length).toFixed(1) : 0), "♥"),
-      kpi("価格の中央値", yen(median), prices.length ? `${yen(prices[0])} 〜 ${yen(prices[prices.length - 1])}` : "—", "¥"),
+      kpi(`${state.window}時間以内に売れた`, `${num(list.length)}本`, `うち新作（24h以内公開）${num(fresh)}本`, "✕"),
+      kpi("売れた数の目安（スキ増加）", `+${num(s.sold)}`, `増加×価格 ${yen(s.sales)}`, "♥"),
+      kpi("売れた記事の価格（中央値）", yen(median), prices.length ? `${yen(prices[0])} 〜 ${yen(prices[prices.length - 1])}` : "—", "¥"),
       kpi("いちばんの勢い", top ? `🔥${top.heat}` : "—", top ? esc(top.title.slice(0, 22)) + (top.title.length > 22 ? "…" : "") : "—", "○"),
     ].join("");
   }
@@ -175,10 +266,12 @@
   }
 
   function renderList(list) {
+    const t = themeById(state.theme);
+    $("#rankTitle").textContent = t ? `${t.name}の売れ筋ランキング` : "売れ筋ランキング";
     $("#resultCount").textContent = `${num(list.length)}件`;
     const box = $("#list");
     if (!list.length) {
-      box.innerHTML = `<div class="panel empty"><div class="empty__face">✕_✕</div><p>条件に合う有料noteが見つからないぞ。<br>キーワードを減らすか、期間・価格を広げてみて。</p></div>`;
+      box.innerHTML = `<div class="panel empty"><div class="empty__face">✕_✕</div><p>この条件で${state.window}時間以内に売れた有料noteは見つからないぞ。<br>キーワードを減らすか、期間・価格・テーマを広げてみて。</p></div>`;
       $("#moreBtn").hidden = true;
       return;
     }
@@ -188,13 +281,21 @@
     $("#moreBtn").textContent = `もっと見る（残り ${num(list.length - state.shown)}件）`;
   }
 
+  function themeChips(n) {
+    return n.themes.slice(0, 2).map((id) => {
+      const t = themeById(id);
+      return t ? `<button class="genre-pill" data-topic="${esc(t.id)}">${esc(t.emoji)} ${esc(t.name)}</button>` : "";
+    }).join("");
+  }
+
   function cardHtml(n, rank) {
     const maru = state.maru.has(n.key);
     const batsu = state.batsu.has(n.key);
     const img = safeUrl(n.eyecatch);
     const avatar = safeUrl(n.creator?.avatar);
-    const fresh = hoursSince(n.publishedAt) < 3 ? `<span class="fresh">NEW</span>` : "";
-    const gain = n.gain3h != null && n.gain3h > 0 ? `<span class="stat stat--up">⤴ 3hで+${num(n.gain3h)}</span>` : "";
+    const fresh = hoursSince(n.publishedAt) <= 24 ? `<span class="fresh">新作</span>` : `<span class="fresh fresh--long">ロングセラー</span>`;
+    const partial = n.measuredHours != null && n.measuredHours < 24 && hoursSince(n.publishedAt) > 24
+      ? `<span class="stat" title="計測を始めてからの増加数です">計測${Math.floor(n.measuredHours)}h分</span>` : "";
     const purchase = n.purchaseCount != null ? `<span class="stat stat--up">🛒 ${num(n.purchaseCount)}人購入</span>` : "";
     return `
       <article class="card ${maru ? "is-maru" : ""} ${batsu ? "is-batsu" : ""}" data-key="${esc(n.key)}">
@@ -205,15 +306,16 @@
           <div class="card__creator">
             ${avatar ? `<img class="avatar" src="${esc(avatar)}" alt="" loading="lazy">` : ""}
             <button class="hashtag" data-creator="${esc(n.creator?.name)}">${esc(n.creator?.name || "不明")}</button>
-            <span>・${ago(n.publishedAt)}</span>
-            <span class="genre-pill">${esc(n.genre)}</span>
+            <span>・公開 ${ago(n.publishedAt)}</span>
+            ${themeChips(n)}
           </div>
           <div class="stats">
+            <span class="stat stat--sold">🛒 ${state.window}hで+${num(gainOf(n))}</span>
             <span class="stat stat--price">${yen(n.price)}</span>
             <span class="stat stat--heat">🔥 ${n.heat}</span>
-            <span class="stat">♥ ${num(n.likes)}</span>
-            <span class="stat">⏱ ${n.likesPerHour}/h</span>
-            ${gain}${purchase}
+            ${state.window !== 3 && n.gain3h ? `<span class="stat stat--up">⤴ 3hで+${num(n.gain3h)}</span>` : ""}
+            <span class="stat">♥ 累計${num(n.likes)}</span>
+            ${partial}${purchase}
           </div>
           <div class="card__foot">
             <div class="hashtags">${n.hashtags.slice(0, 5).map((t) => `<button class="hashtag" data-tag="${esc(t)}">#${esc(t)}</button>`).join("")}</div>
@@ -230,22 +332,23 @@
 
   function tableHtml(items) {
     const cols = [
-      ["#", null], ["タイトル", null], ["作者", null], ["価格", "priceDesc"], ["🔥勢い", "heat"],
-      ["♥スキ", "likes"], ["/h", "likesPerHour"], ["3h増", "gain3h"], ["スキ×価格", "revenueIndex"], ["公開", "new"], ["", null],
+      ["#", null], ["タイトル", null], ["テーマ", null], ["価格", "priceDesc"], ["🔥勢い", "heat"],
+      ["24h売れ", "gain24h"], ["3h", "gain3h"], ["1h", "gain1h"], ["増加×価格", "salesIndex"], ["♥累計", "likes"], ["公開", "new"], ["", null],
     ];
     const head = cols.map(([label, key]) => `<th ${key ? `data-sort="${key}"` : ""}>${label}${key === state.sort ? " ▼" : ""}</th>`).join("");
     const rows = items.map((n, i) => {
       const maru = state.maru.has(n.key);
       return `<tr>
         <td class="num">${i + 1}</td>
-        <td class="title"><a href="${esc(safeUrl(n.url))}" target="_blank" rel="noopener">${esc(n.title)}</a></td>
-        <td>${esc(n.creator?.name || "")}</td>
+        <td class="title"><a href="${esc(safeUrl(n.url))}" target="_blank" rel="noopener">${esc(n.title)}</a><br><small class="muted">${esc(n.creator?.name || "")}</small></td>
+        <td>${n.themes.slice(0, 2).map((id) => esc(themeById(id)?.name || "")).join("<br>")}</td>
         <td class="num">${yen(n.price)}</td>
         <td class="num">${n.heat}</td>
+        <td class="num"><b>+${num(n.gain24h)}</b></td>
+        <td class="num">+${num(n.gain3h)}</td>
+        <td class="num">+${num(n.gain1h)}</td>
+        <td class="num">${yen(n.salesIndex)}</td>
         <td class="num">${num(n.likes)}</td>
-        <td class="num">${n.likesPerHour}</td>
-        <td class="num">${n.gain3h == null ? "—" : "+" + num(n.gain3h)}</td>
-        <td class="num">${yen(n.revenueIndex)}</td>
         <td>${ago(n.publishedAt)}</td>
         <td><button class="mb mb--maru ${maru ? "on" : ""}" data-maru="${esc(n.key)}" title="保存">○</button></td>
       </tr>`;
@@ -255,7 +358,7 @@
 
   function sparkPoints(n) {
     let pts = (n.history || []).map(([ts, v]) => [new Date(ts).getTime(), v]);
-    if (pts.length < 2) pts = [[new Date(n.publishedAt).getTime(), 0], [Date.now(), n.likes]];
+    if (pts.length < 2) pts = [[Date.now() - 24 * 3600000, n.likes - n.gain24h], [Date.now(), n.likes]];
     return pts;
   }
   function sparkSvg(n, w, h, cls, axis = false) {
@@ -285,24 +388,20 @@
       </button>`).join("");
   }
 
-  function renderGenres(list) {
-    const m = new Map();
-    list.forEach((n) => {
-      const g = m.get(n.genre) || { heat: 0, count: 0 };
-      g.heat += n.heat; g.count += 1;
-      m.set(n.genre, g);
-    });
-    const rows = [...m.entries()].sort((a, b) => b[1].heat - a[1].heat)
-      .map(([k, v]) => ({ key: k, label: k, value: v.heat, display: `${v.count}件` }));
-    $("#genreChart").innerHTML = rows.length ? bars(rows, "genre", state.genre) : `<p class="note-text">データなし</p>`;
+  function renderThemeChart(base) {
+    const rows = state.themes.map((t) => {
+      const s = themeStats(base.filter((n) => inTheme(n, t.id)));
+      return { key: t.id, label: `${t.emoji} ${t.name}`, value: s.sold, display: `+${num(s.sold)}` };
+    }).sort((a, b) => b.value - a.value);
+    $("#themeChart").innerHTML = rows.length ? bars(rows, "topic", state.theme) : `<p class="note-text">データなし</p>`;
   }
 
   function renderTags(list) {
     const m = new Map();
-    list.forEach((n) => n.hashtags.forEach((t) => m.set(t, (m.get(t) || 0) + n.heat)));
+    list.forEach((n) => n.hashtags.forEach((t) => m.set(t, (m.get(t) || 0) + gainOf(n))));
     const top = [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 18);
     $("#tagCloud").innerHTML = top.length
-      ? top.map(([t, v]) => `<button data-tag="${esc(t)}">#${esc(t)}<small>${Math.round(v)}</small></button>`).join("")
+      ? top.map(([t, v]) => `<button data-tag="${esc(t)}">#${esc(t)}<small>+${num(v)}</small></button>`).join("")
       : `<p class="note-text">ハッシュタグなし</p>`;
   }
 
@@ -310,11 +409,12 @@
     const bands = [["〜300", 0, 300], ["301〜500", 301, 500], ["501〜1,000", 501, 1000], ["1,001〜3,000", 1001, 3000], ["3,001〜10,000", 3001, 10000], ["10,001〜", 10001, Infinity]];
     const rows = bands.map(([label, lo, hi]) => {
       const items = list.filter((n) => n.price >= lo && n.price <= hi);
-      const avgHeat = items.length ? items.reduce((s, n) => s + n.heat, 0) / items.length : 0;
-      return { key: label, label, value: items.length, display: `${items.length}件`, avgHeat };
+      const sold = items.reduce((s, n) => s + gainOf(n), 0);
+      return { key: label, label, value: sold, display: `+${num(sold)}` };
     });
+    const best = rows.slice().sort((a, b) => b.value - a.value)[0];
     $("#priceChart").innerHTML = bars(rows, null) +
-      `<p class="note-text">平均勢いが一番高い価格帯: <b>${rows.slice().sort((a, b) => b.avgHeat - a.avgHeat)[0].label}円</b></p>`;
+      (best.value ? `<p class="note-text">いちばん売れている価格帯: <b>${best.label}円</b></p>` : "");
   }
 
   function renderHours(list) {
@@ -330,34 +430,35 @@
     const m = new Map();
     list.forEach((n) => {
       const name = n.creator?.name || "不明";
-      const c = m.get(name) || { heat: 0, count: 0, likes: 0 };
-      c.heat += n.heat; c.count += 1; c.likes += n.likes;
+      const c = m.get(name) || { sold: 0, count: 0 };
+      c.sold += gainOf(n); c.count += 1;
       m.set(name, c);
     });
-    const top = [...m.entries()].sort((a, b) => b[1].heat - a[1].heat).slice(0, 8);
+    const top = [...m.entries()].sort((a, b) => b[1].sold - a[1].sold).slice(0, 8);
     $("#creators").innerHTML = top.map(([name, c]) =>
-      `<li><button data-creator="${esc(name)}">${esc(name)}</button><span>${c.count}本・♥${num(c.likes)}</span></li>`).join("");
+      `<li><button data-creator="${esc(name)}">${esc(name)}</button><span>${c.count}本・+${num(c.sold)}</span></li>`).join("");
   }
 
   // ---------- 詳細 ----------
   function openDetail(key) {
     const n = state.notes.find((x) => x.key === key);
     if (!n) return;
-    const est = (rate) => Math.round(n.likes * rate);
+    const lo = Math.round(n.gain24h * 0.3), hi = Math.round(n.gain24h * 0.8);
     $("#detailBody").innerHTML = `
-      <span class="genre-pill">${esc(n.genre)}</span>
+      <div>${themeChips(n)}</div>
       <h3>${esc(n.title)}</h3>
       <p class="muted">${esc(n.creator?.name || "")}・公開 ${fmtTime(n.publishedAt)}（${ago(n.publishedAt)}）</p>
       <div class="detail__grid">
         <div><small>価格</small><b>${yen(n.price)}</b></div>
         <div><small>勢いスコア</small><b>🔥${n.heat}</b></div>
-        <div><small>スキ</small><b>♥${num(n.likes)}</b></div>
-        <div><small>1時間あたり</small><b>${n.likesPerHour}</b></div>
-        <div><small>直近1h / 3h</small><b>${n.gain1h == null ? "—" : "+" + n.gain1h} / ${n.gain3h == null ? "—" : "+" + n.gain3h}</b></div>
-        <div><small>スキ×価格</small><b>${yen(n.revenueIndex)}</b></div>
+        <div><small>24hのスキ増加</small><b>+${num(n.gain24h)}</b></div>
+        <div><small>直近 6h / 3h / 1h</small><b>+${n.gain6h} / +${n.gain3h} / +${n.gain1h}</b></div>
+        <div><small>スキ累計</small><b>♥${num(n.likes)}</b></div>
+        <div><small>24h増加×価格</small><b>${yen(n.salesIndex)}</b></div>
       </div>
       ${sparkSvg(n, 600, 140, "bigspark", true)}
-      <p class="note-text">参考: スキした人の 30〜80% が購入者だと仮定すると、購入数はおよそ <b>${num(est(0.3))}〜${num(est(0.8))}件</b>、売上は <b>${yen(est(0.3) * n.price)}〜${yen(est(0.8) * n.price)}</b>。あくまで仮定に基づく目安です。</p>
+      <p class="note-text">参考: 増えたスキの 30〜80% が購入者だと仮定すると、24時間の購入数はおよそ <b>${num(lo)}〜${num(hi)}件</b>、売上は <b>${yen(lo * n.price)}〜${yen(hi * n.price)}</b>。あくまで仮定に基づく目安です。</p>
+      ${n.measuredHours != null && n.measuredHours < 24 && hoursSince(n.publishedAt) > 24 ? `<p class="note-text">※ この記事は計測を始めてから ${Math.floor(n.measuredHours)}時間分の増加数です。</p>` : ""}
       <p class="note-text">${n.hashtags.map((t) => "#" + esc(t)).join(" ")}</p>
       <p style="margin-top:14px"><a class="btn" href="${esc(safeUrl(n.url))}" target="_blank" rel="noopener">noteで開く ↗</a></p>`;
     $("#detail").showModal();
@@ -373,12 +474,12 @@
   }
 
   function syncControls() {
-    $("#q").value !== state.q && ($("#q").value = state.q);
+    if ($("#q").value !== state.q) $("#q").value = state.q;
     $$("#windowChips button").forEach((b) => b.classList.toggle("on", Number(b.dataset.v) === state.window));
     $$("#priceChips button").forEach((b) => b.classList.toggle("on", b.dataset.v === state.price));
-    $("#genre").value = state.genre;
-    $("#minLikes").value = String(state.minLikes);
-    $("#minLikesVal").textContent = String(state.minLikes);
+    $("#published").value = String(state.published);
+    $("#minLikes").value = String(state.minGain);
+    $("#minLikesVal").textContent = String(state.minGain);
     $("#sort").value = state.sort;
     $("#onlyMaru").checked = state.onlyMaru;
     $("#showBatsu").checked = state.showBatsu;
@@ -386,46 +487,44 @@
     $("#viewTable").classList.toggle("on", state.view === "table");
   }
 
-  function fillGenres() {
-    const genres = [...new Set(state.notes.map((n) => n.genre))].sort();
-    $("#genre").innerHTML = `<option value="">すべて</option>` + genres.map((g) => `<option>${esc(g)}</option>`).join("");
-  }
-
   function syncUrl() {
     const p = new URLSearchParams();
+    if (state.theme) p.set("theme", state.theme);
     if (state.q) p.set("q", state.q);
     if (state.window !== 24) p.set("h", state.window);
+    if (state.published) p.set("pub", state.published);
     if (state.price !== "all") p.set("price", state.price);
-    if (state.genre) p.set("genre", state.genre);
-    if (state.minLikes) p.set("min", state.minLikes);
+    if (state.minGain > 1) p.set("min", state.minGain);
     if (state.sort !== "heat") p.set("sort", state.sort);
     const qs = p.toString();
     history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
   }
   function readUrl() {
     const p = new URLSearchParams(location.search);
+    state.theme = p.get("theme") ?? load(STORE.theme, "") ?? "";
     state.q = p.get("q") || "";
-    state.window = [3, 6, 12, 24].includes(Number(p.get("h"))) ? Number(p.get("h")) : 24;
+    state.window = WINDOWS.includes(Number(p.get("h"))) ? Number(p.get("h")) : 24;
+    state.published = [24, 168, 720].includes(Number(p.get("pub"))) ? Number(p.get("pub")) : 0;
     state.price = p.get("price") || "all";
-    state.genre = p.get("genre") || "";
-    state.minLikes = Number(p.get("min")) || 0;
+    state.minGain = Math.max(1, Number(p.get("min")) || 1);
     state.sort = SORTERS[p.get("sort")] ? p.get("sort") : "heat";
   }
 
   function update(patch) {
     Object.assign(state, patch, { shown: PAGE });
+    if ("theme" in patch) save(STORE.theme, state.theme);
     render();
   }
 
   function exportCsv() {
     const list = filtered();
-    const head = ["順位", "タイトル", "作者", "価格", "勢いスコア", "スキ", "1時間あたりスキ", "3h増加", "スキ×価格", "ジャンル", "公開日時", "ハッシュタグ", "URL"];
-    const rows = list.map((n, i) => [i + 1, n.title, n.creator?.name, n.price, n.heat, n.likes, n.likesPerHour, n.gain3h ?? "", n.revenueIndex, n.genre, fmtTime(n.publishedAt), n.hashtags.join(" "), n.url]);
+    const head = ["順位", "タイトル", "作者", "テーマ", "価格", "勢いスコア", "24hスキ増加", "6h", "3h", "1h", "24h増加×価格", "スキ累計", "公開日時", "ハッシュタグ", "URL"];
+    const rows = list.map((n, i) => [i + 1, n.title, n.creator?.name, n.themes.map((id) => themeById(id)?.name).filter(Boolean).join(" "), n.price, n.heat, n.gain24h, n.gain6h, n.gain3h, n.gain1h, n.salesIndex, n.likes, fmtTime(n.publishedAt), n.hashtags.join(" "), n.url]);
     const csv = [head, ...rows].map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `note-urezuji-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `note-urezuji-${state.theme || "all"}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
     toast(`${list.length}件をCSVに書き出しました`);
@@ -436,8 +535,8 @@
     $("#q").addEventListener("input", (e) => { clearTimeout(t); t = setTimeout(() => update({ q: e.target.value.trim() }), 200); });
     $("#windowChips").addEventListener("click", (e) => e.target.dataset.v && update({ window: Number(e.target.dataset.v) }));
     $("#priceChips").addEventListener("click", (e) => e.target.dataset.v && update({ price: e.target.dataset.v }));
-    $("#genre").addEventListener("change", (e) => update({ genre: e.target.value }));
-    $("#minLikes").addEventListener("input", (e) => update({ minLikes: Number(e.target.value) }));
+    $("#published").addEventListener("change", (e) => update({ published: Number(e.target.value) }));
+    $("#minLikes").addEventListener("input", (e) => update({ minGain: Number(e.target.value) }));
     $("#sort").addEventListener("change", (e) => update({ sort: e.target.value }));
     $("#onlyMaru").addEventListener("change", (e) => update({ onlyMaru: e.target.checked }));
     $("#showBatsu").addEventListener("change", (e) => update({ showBatsu: e.target.checked }));
@@ -445,7 +544,7 @@
     $("#viewTable").addEventListener("click", () => { save(STORE.view, "table"); update({ view: "table" }); });
     $("#moreBtn").addEventListener("click", () => { state.shown += PAGE; render(); });
     $("#csvBtn").addEventListener("click", exportCsv);
-    $("#resetBtn").addEventListener("click", () => update({ q: "", window: 24, price: "all", genre: "", minLikes: 0, sort: "heat", onlyMaru: false, showBatsu: false }));
+    $("#resetBtn").addEventListener("click", () => update({ theme: "", q: "", window: 24, published: 0, price: "all", minGain: 1, sort: "heat", onlyMaru: false, showBatsu: false }));
     $("#shareBtn").addEventListener("click", async () => {
       try { await navigator.clipboard.writeText(location.href); toast("この検索条件のURLをコピーしました"); }
       catch (_) { toast(location.href); }
@@ -455,19 +554,23 @@
         ? document.documentElement.dataset.theme === "dark"
         : matchMedia("(prefers-color-scheme: dark)").matches;
       document.documentElement.dataset.theme = dark ? "light" : "dark";
-      save(STORE.theme, document.documentElement.dataset.theme);
+      save("nr:color", document.documentElement.dataset.theme);
     });
 
     // 一覧・サイド内のボタンはまとめて委譲
     document.addEventListener("click", (e) => {
-      const el = e.target.closest("[data-maru],[data-batsu],[data-tag],[data-creator],[data-genre],[data-detail],[data-sort]");
+      const el = e.target.closest("[data-maru],[data-batsu],[data-tag],[data-creator],[data-topic],[data-detail],[data-sort]");
       if (!el) return;
       const d = el.dataset;
       if (d.maru) toggleMark(state.maru, state.batsu, d.maru, STORE.maru, STORE.batsu);
       else if (d.batsu) toggleMark(state.batsu, state.maru, d.batsu, STORE.batsu, STORE.maru);
       else if (d.tag) update({ q: "#" + d.tag });
       else if (d.creator) update({ q: d.creator });
-      else if (d.genre !== undefined) update({ genre: state.genre === d.genre ? "" : d.genre });
+      else if (d.topic !== undefined) {
+        $("#detail").open && $("#detail").close();
+        update({ theme: d.topic });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
       else if (d.detail) openDetail(d.detail);
       else if (d.sort) update({ sort: d.sort });
     });
@@ -475,60 +578,60 @@
   }
 
   // ---------- サンプルデータ（data/latest.json がまだ無いとき用） ----------
-  function makeDemo() {
+  function makeDemo(themes) {
     let seed = 20261014;
     const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
     const pickOne = (a) => a[Math.floor(rnd() * a.length)];
-    const topics = [
-      ["AI・テック", ["ChatGPT", "生成AI", "プロンプト", "Claude"], ["ChatGPTで月10万円稼ぐ完全マニュアル", "Claudeで業務を9割自動化したプロンプト集", "生成AI画像で副業を始める全手順"]],
-      ["副業・稼ぐ", ["副業", "コンテンツ販売", "マネタイズ"], ["会社員が副業で月5万円を超えるまでにやったこと全部", "noteで初月30万円売れた有料記事の作り方", "スキマ時間で始める物販の教科書"]],
-      ["SNS・マーケ", ["X運用", "SNS運用", "Instagram"], ["フォロワー0から1万人までのX運用ロードマップ", "インスタ集客で予約が3倍になった投稿テンプレ", "バズるショート動画の台本の型"]],
-      ["投資・お金", ["投資", "新NISA", "株"], ["新NISAで迷わない銘柄選びの結論", "高配当株で月3万円の不労所得をつくる", "FXで負けない資金管理ルール"]],
-      ["ギャンブル予想", ["競馬", "競馬予想"], ["今週末の重賞 本命と穴馬を全公開", "回収率120%を続ける馬券の買い方"]],
-      ["恋愛・美容", ["恋愛", "ダイエット", "美容"], ["3ヶ月で-8kgした食事メニュー全公開", "マッチングアプリで会える人になるプロフィール術"]],
-      ["仕事・キャリア", ["転職", "キャリア"], ["年収を150万上げた転職の進め方", "外資コンサル流 資料作成の基本"]],
-      ["占い・スピ", ["占い", "タロット"], ["2026年下半期の12星座別 運勢鑑定", "お金に好かれる人の開運習慣"]],
-    ];
+    const titles = {
+      fukugyo: ["会社員が副業で月5万円を超えるまでにやったこと全部", "noteで初月30万円売れた有料記事の作り方", "スキマ時間で始める物販の教科書"],
+      ai: ["ChatGPTで月10万円稼ぐ完全マニュアル", "Claudeで業務を9割自動化したプロンプト集", "生成AI画像で副業を始める全手順"],
+      sns: ["フォロワー0から1万人までのX運用ロードマップ", "インスタ集客で予約が3倍になった投稿テンプレ", "バズるショート動画の台本の型"],
+      money: ["新NISAで迷わない銘柄選びの結論", "高配当株で月3万円の不労所得をつくる", "FXで負けない資金管理ルール"],
+      gamble: ["今週末の重賞 本命と穴馬を全公開", "回収率120%を続ける馬券の買い方"],
+      love: ["3ヶ月で-8kgした食事メニュー全公開", "マッチングアプリで会える人になるプロフィール術"],
+      career: ["年収を150万上げた転職の進め方", "外資コンサル流 資料作成の基本"],
+      study: ["TOEIC900点までの独学ロードマップ", "子どもが勉強好きになる声かけ集"],
+      creative: ["売れるイラストポートフォリオの作り方", "小説新人賞の一次選考を通る構成術"],
+      fortune: ["2026年下半期の12星座別 運勢鑑定", "お金に好かれる人の開運習慣"],
+    };
+    const ids = themes.length ? themes.map((t) => t.id) : Object.keys(titles);
     const names = ["ゆうき｜AI副業", "まる子", "ペン田くん", "Kei@マーケター", "しろくろ", "あおい｜投資", "夜ふかし研究所", "とげとげ", "ナマイキ編集部", "はやて"];
     const now = Date.now();
     const notes = [];
-    for (let i = 0; i < 64; i++) {
-      const [genre, tags, titles] = pickOne(topics);
-      const age = rnd() * 23.5 + 0.3;
-      const price = pickOne([100, 300, 480, 500, 980, 1000, 1480, 1980, 2980, 4980, 9800, 19800]);
-      const speed = Math.pow(rnd(), 2.2) * 9;
-      const likes = Math.max(0, Math.round(speed * age + rnd() * 3));
-      const published = new Date(now - age * 3600000);
+    for (let i = 0; i < 80; i++) {
+      const theme = pickOne(ids);
+      const tags = themes.find((t) => t.id === theme)?.keywords || ["note"];
+      const age = rnd() > 0.45 ? rnd() * 23 + 0.5 : 24 + rnd() * 24 * 40;
+      const price = pickOne([100, 300, 480, 500, 980, 1000, 1480, 1980, 2980, 4980, 9800]);
+      const speed = Math.pow(rnd(), 2.4) * 4 + 0.05;
+      const g = (h) => Math.round(speed * Math.min(h, age) * (0.6 + rnd() * 0.8));
+      const gain1h = g(1), gain3h = Math.max(gain1h, g(3)), gain6h = Math.max(gain3h, g(6)), gain24h = Math.max(gain6h, g(24), 1);
+      const likes = gain24h + (age > 24 ? Math.round(rnd() * 300) : 0);
       const history = [];
-      for (let h = Math.min(Math.floor(age), 24); h >= 0; h--) {
-        history.push([new Date(now - h * 3600000).toISOString(), Math.round(likes * Math.pow((age - h) / age, 0.8))]);
-      }
-      const g3 = likes - (history[history.length - 4]?.[1] ?? 0);
-      const lph = +(likes / Math.max(age, 0.5)).toFixed(2);
+      for (let h = 24; h >= 0; h--) history.push([new Date(now - h * 3600000).toISOString(), Math.round(likes - gain24h * (h / 24))]);
       notes.push({
         key: "nsample" + i.toString(16).padStart(6, "0"),
-        title: pickOne(titles) + (rnd() > 0.7 ? "【保存版】" : ""),
+        title: pickOne(titles[theme] || ["有料noteサンプル"]) + (rnd() > 0.7 ? "【保存版】" : ""),
         url: "https://note.com/",
-        price, likes, comments: Math.round(likes * 0.05),
-        publishedAt: published.toISOString(),
+        price, likes,
+        publishedAt: new Date(now - age * 3600000).toISOString(),
         eyecatch: null,
         hashtags: [...new Set([pickOne(tags), pickOne(tags), "有料記事"])],
-        genre,
+        themes: [theme],
         creator: { name: pickOne(names), urlname: "", avatar: null },
-        likesPerHour: lph,
-        likesGain1h: likes - (history[history.length - 2]?.[1] ?? 0),
-        likesGain3h: g3,
-        heat: +((lph * 0.6 + (g3 / 3) * 0.4) * (1 + Math.min(price, 30000) / 10000) * 10).toFixed(1),
-        revenueIndex: likes * price,
+        gain1h, gain3h, gain6h, gain24h,
+        measuredHours: 24,
+        heat: +((gain24h + gain3h * 3) * (1 + Math.min(price, 30000) / 10000)).toFixed(1),
+        salesIndex: gain24h * price,
         history,
       });
     }
-    return { generatedAt: new Date(now).toISOString(), windowHours: 24, notes };
+    return { generatedAt: new Date(now).toISOString(), trackingSince: new Date(now - 48 * 3600000).toISOString(), notes };
   }
 
   // ---------- 起動 ----------
-  const theme = load(STORE.theme, null);
-  if (theme) document.documentElement.dataset.theme = theme;
+  const color = load("nr:color", null);
+  if (color) document.documentElement.dataset.theme = color;
   state.view = load(STORE.view, "card") === "table" ? "table" : "card";
   readUrl();
   bind();
