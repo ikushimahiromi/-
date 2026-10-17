@@ -2,6 +2,12 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
+  <script>
+    // 末尾の「/」が無いURL（…/note-radar）で開くと、style.css などが別の場所を指して表示が崩れるため付け直す
+    if (!location.pathname.endsWith("/") && !/\.[a-z]+$/i.test(location.pathname)) {
+      location.replace(location.pathname + "/" + location.search + location.hash);
+    }
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>note売れ筋レーダー</title>
   <meta name="description" content="直近24時間で売れている有料noteを、テーマ別に探せるツール">
