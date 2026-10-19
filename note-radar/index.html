@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <script>
+    // 末尾の「/」が無いURL（…/note-radar）で開くと、style.css などが別の場所を指して表示が崩れるため付け直す
+    if (!location.pathname.endsWith("/") && !/\.[a-z]+$/i.test(location.pathname)) {
+      location.replace(location.pathname + "/" + location.search + location.hash);
+    }
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0b0b">
+  <title>note売れ筋レーダー</title>
+  <meta name="description" content="直近24時間で売れている有料noteを、テーマ別に探せるツール">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="img/favicon.png">
+</head>
+<body>
+  <header class="hero">
+    <div class="hero__inner">
+      <img class="hero__icon" src="img/icon.webp" alt="" width="96" height="96">
+      <div class="hero__text">
+        <h1 class="hero__title">note<span>売れ筋</span>レーダー</h1>
+        <p class="hero__sub">24時間以内に売れた有料noteだけを、テーマ別にチェック。</p>
+        <p class="hero__meta"><span id="dataBadge" class="badge">読み込み中…</span><span id="updatedAt"></span></p>
+      </div>
+      <span class="hero__spark hero__spark--a" aria-hidden="true">✦</span>
+      <span class="hero__spark hero__spark--b" aria-hidden="true">✦</span>
+    </div>
+  </header>
+
+  <nav class="themes" aria-label="テーマ">
+    <div class="themes__inner" id="themeTabs" role="tablist"></div>
+  </nav>
+
+  <main class="wrap">
+    <div id="notice" class="notice" hidden></div>
+    <section id="themeHead" class="theme-head" aria-live="polite"></section>
+
+    <section class="controls" aria-label="検索条件">
+      <div class="search">
+        <input id="q" type="search" placeholder="キーワード・作者・#タグで検索（例: ChatGPT）" autocomplete="off" aria-label="キーワード検索">
+      </div>
+      <div class="controls__row">
+        <div class="field">
+          <span class="field__label">この時間内に売れた</span>
+          <div class="chips" id="windowChips" role="group" aria-label="売れた期間">
+            <button data-v="1">1時間</button><button data-v="3">3時間</button><button data-v="6">6時間</button><button data-v="24" class="on">24時間</button>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label" for="sort">並び順</label>
+          <select id="sort">
+            <option value="heat">勢いがある順</option>
+            <option value="gain24h">24時間で売れた数が多い順</option>
+            <option value="gain3h">直近3時間で伸びている順</option>
+            <option value="gain1h">直近1時間で伸びている順</option>
+            <option value="salesIndex">売上の目安が大きい順</option>
+            <option value="likes">スキの累計が多い順</option>
+            <option value="priceDesc">価格が高い順</option>
+            <option value="priceAsc">価格が安い順</option>
+            <option value="new">新しく公開された順</option>
+          </select>
+        </div>
+      </div>
+
+      <details class="more">
+        <summary>もっと細かく絞り込む</summary>
+        <div class="controls__row">
+          <div class="field">
+            <span class="field__label">価格</span>
+            <div class="chips" id="priceChips" role="group" aria-label="価格帯">
+              <button data-v="all" class="on">すべて</button><button data-v="0-500">〜500円</button><button data-v="501-1000">〜1,000円</button><button data-v="1001-3000">〜3,000円</button><button data-v="3001-9999999">3,001円〜</button>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field__label" for="published">公開日</label>
+            <select id="published">
+              <option value="0">いつでも</option>
+              <option value="24">24時間以内</option>
+              <option value="168">7日以内</option>
+              <option value="720">30日以内</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field__label" for="minLikes">売れた数（スキ増加）<b id="minLikesVal">1</b> 以上</label>
+            <input id="minLikes" type="range" min="1" max="50" step="1" value="1">
+          </div>
+        </div>
+        <div class="controls__row controls__row--tools">
+          <label class="toggle"><input type="checkbox" id="onlyMaru"> 保存したものだけ</label>
+          <label class="toggle"><input type="checkbox" id="showBatsu"> 非表示にしたものも出す</label>
+          <span class="spacer"></span>
+          <div class="seg" role="group" aria-label="表示切替">
+            <button id="viewCard" class="on" type="button">カード</button>
+            <button id="viewTable" type="button">表</button>
+          </div>
+          <button id="shareBtn" class="btn btn--ghost" type="button">条件をコピー</button>
+          <button id="csvBtn" class="btn btn--ghost" type="button">CSV出力</button>
+          <button id="resetBtn" class="btn btn--ghost" type="button">リセット</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="kpis" id="kpis" aria-label="サマリー"></section>
+
+    <div class="layout">
+      <section class="results" aria-live="polite">
+        <div class="results__head">
+          <h2 class="section-title" id="rankTitle">売れ筋ランキング</h2>
+          <span id="resultCount" class="muted"></span>
+        </div>
+        <div id="list"></div>
+        <button id="moreBtn" class="btn btn--wide" type="button" hidden>もっと見る</button>
+      </section>
+
+      <aside class="side">
+        <section class="panel">
+          <h3 class="side-title">テーマ別の売れ行き</h3>
+          <div id="themeChart" class="bars"></div>
+        </section>
+        <section class="panel">
+          <h3 class="side-title">売れているハッシュタグ</h3>
+          <div id="tagCloud" class="tagcloud"></div>
+        </section>
+        <section class="panel">
+          <h3 class="side-title">価格帯ごとの売れ行き</h3>
+          <div id="priceChart" class="bars"></div>
+        </section>
+        <section class="panel">
+          <h3 class="side-title">売れた記事の公開時間帯</h3>
+          <div id="hourChart" class="hours"></div>
+          <p class="note-text" id="hourNote"></p>
+        </section>
+        <section class="panel">
+          <h3 class="side-title">売れているクリエイター</h3>
+          <ol id="creators" class="creators"></ol>
+        </section>
+      </aside>
+    </div>
+
+    <section class="panel howto">
+      <h2 class="section-title">このツールの見方</h2>
+      <div class="howto__grid">
+        <div>
+          <h4>「売れた」の決め方</h4>
+          <p>noteは販売数を公開していません。そこで有料noteのスキ数を1時間ごとに記録し、<b>直近24時間でスキが増えたものだけ</b>を「売れた」としています。公開日は問わないので、前から売れ続けている記事も出ます。</p>
+        </div>
+        <div>
+          <h4>勢い</h4>
+          <p>（24時間のスキ増加 ＋ 直近3時間のスキ増加 × 3）× 価格の重み。いま伸びているものほど上に来ます。</p>
+        </div>
+        <div>
+          <h4>テーマ</h4>
+          <p>上のタブで切り替えます。テーマは記事のタイトルとハッシュタグから自動で判定しています。</p>
+        </div>
+        <div>
+          <h4>保存と非表示</h4>
+          <p>カードの「○」で保存、「✕」で非表示にできます。この設定はお使いのブラウザにだけ保存されます。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="detail" class="detail">
+    <form method="dialog"><button class="detail__close" aria-label="閉じる">✕</button></form>
+    <div id="detailBody"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <footer class="footer">
+    <p>データ: note.com の公開情報（非公式API）を1時間ごとに収集。note株式会社とは関係ありません。</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
