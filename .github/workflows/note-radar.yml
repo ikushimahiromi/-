@@ -1,23 +1,29 @@
 name: note-radar
 
+# note.com から「24時間以内に売れた有料note」を集め、note-radar/data にコミットする。
+# 公開は Netlify がコミットを拾って自動で行う。
 on:
   schedule:
-    - cron: "7 * * * *" # 毎時7分（UTC）
+    - cron: "7 * * * *" # 毎時7分（UTC）。デフォルトブランチでのみ動く
   workflow_dispatch:
+  push:
+    branches: [claude/note-radar]
+    paths:
+      - "note-radar/scripts/**"
+      - "note-radar/themes.json"
+      - ".github/workflows/note-radar.yml"
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
-  group: note-radar
+  group: note-radar-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -40,19 +46,3 @@ jobs:
             git pull --rebase origin "${GITHUB_REF_NAME}"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
-
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: note-radar
-
-  deploy:
-    needs: update
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4

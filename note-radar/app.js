@@ -226,8 +226,8 @@
         <button class="theme-card ${i === 0 && s.sold ? "theme-card--top" : ""}" data-topic="${esc(t.id)}">
           <span class="theme-card__emoji">${esc(t.emoji)}</span>
           <span class="theme-card__name">${esc(t.name)}</span>
-          <span class="theme-card__num">🛒 ${num(s.sold)}<small> / ${state.window}h</small></span>
-          <span class="theme-card__sub">${num(s.count)}本が売れた${top ? `・1位「${esc(top.title.slice(0, 16))}${top.title.length > 16 ? "…" : ""}」` : ""}</span>
+          <span class="theme-card__num">+${num(s.sold)}<small> 売れた</small></span>
+          <span class="theme-card__sub">${num(s.count)}本${top ? `・1位「${esc(top.title.slice(0, 14))}${top.title.length > 14 ? "…" : ""}」` : ""}</span>
         </button>`).join("")}</div>`;
       return;
     }
@@ -240,11 +240,11 @@
       <div class="theme-banner">
         <span class="theme-banner__emoji">${esc(t.emoji)}</span>
         <div class="theme-banner__body">
-          <h2>${esc(t.name)} で ${state.window}時間以内に売れたnote</h2>
-          <p>${num(s.count)}本・スキ増加 ${num(s.sold)}・増加×価格 ${yen(s.sales)}</p>
-          <div class="theme-banner__tags">${tags.map(([h]) => `<button class="hashtag" data-tag="${esc(h)}">#${esc(h)}</button>`).join("")}</div>
+          <h2>${esc(t.name)}<small>で${state.window}時間以内に売れたnote</small></h2>
+          <p>${num(s.count)}本 ／ 売れた数の目安 +${num(s.sold)} ／ 売上の目安 ${yen(s.sales)}</p>
+          <div class="theme-banner__tags">${tags.map(([h]) => `<button class="tag" data-tag="${esc(h)}">#${esc(h)}</button>`).join("")}</div>
         </div>
-        <button class="btn btn--ghost" data-topic="">すべてのテーマ</button>
+        <button class="btn btn--ghost" data-topic="">すべてのテーマへ</button>
       </div>`;
   }
 
@@ -252,17 +252,15 @@
     const s = themeStats(list);
     const prices = list.map((n) => n.price).sort((a, b) => a - b);
     const median = prices.length ? prices[Math.floor(prices.length / 2)] : 0;
-    const top = list.slice().sort(SORTERS.heat)[0];
     const fresh = list.filter((n) => hoursSince(n.publishedAt) <= 24).length;
     $("#kpis").innerHTML = [
-      kpi(`${state.window}時間以内に売れた`, `${num(list.length)}本`, `うち新作（24h以内公開）${num(fresh)}本`, "✕"),
-      kpi("売れた数の目安（スキ増加）", `+${num(s.sold)}`, `増加×価格 ${yen(s.sales)}`, "♥"),
-      kpi("売れた記事の価格（中央値）", yen(median), prices.length ? `${yen(prices[0])} 〜 ${yen(prices[prices.length - 1])}` : "—", "¥"),
-      kpi("いちばんの勢い", top ? `🔥${top.heat}` : "—", top ? esc(top.title.slice(0, 22)) + (top.title.length > 22 ? "…" : "") : "—", "○"),
+      kpi(`${state.window}時間以内に売れたnote`, `${num(list.length)}<small>本</small>`, `うち新作 ${num(fresh)}本`),
+      kpi("売れた数の目安", `+${num(s.sold)}`, `売上の目安 ${yen(s.sales)}`),
+      kpi("売れた記事の価格（中央値）", yen(median), prices.length ? `${yen(prices[0])} 〜 ${yen(prices[prices.length - 1])}` : "—"),
     ].join("");
   }
-  function kpi(label, value, sub, mark) {
-    return `<div class="panel kpi" data-mark="${mark}"><div class="kpi__label">${label}</div><div class="kpi__value">${value}</div><div class="kpi__sub">${sub}</div></div>`;
+  function kpi(label, value, sub) {
+    return `<div class="kpi"><div class="kpi__label">${label}</div><div class="kpi__value">${value}</div><div class="kpi__sub">${sub}</div></div>`;
   }
 
   function renderList(list) {
@@ -271,7 +269,7 @@
     $("#resultCount").textContent = `${num(list.length)}件`;
     const box = $("#list");
     if (!list.length) {
-      box.innerHTML = `<div class="panel empty"><div class="empty__face">✕_✕</div><p>この条件で${state.window}時間以内に売れた有料noteは見つからないぞ。<br>キーワードを減らすか、期間・価格・テーマを広げてみて。</p></div>`;
+      box.innerHTML = `<div class="panel empty"><img src="img/icon.webp" alt="" width="88" height="88"><p>この条件で${state.window}時間以内に売れた有料noteは見つからなかった。<br>キーワードを減らすか、期間・価格・テーマを広げてみて。</p></div>`;
       $("#moreBtn").hidden = true;
       return;
     }
@@ -284,8 +282,14 @@
   function themeChips(n) {
     return n.themes.slice(0, 2).map((id) => {
       const t = themeById(id);
-      return t ? `<button class="genre-pill" data-topic="${esc(t.id)}">${esc(t.emoji)} ${esc(t.name)}</button>` : "";
+      return t ? `<button class="label label--theme" data-topic="${esc(t.id)}">${esc(t.emoji)} ${esc(t.name)}</button>` : "";
     }).join("");
+  }
+
+  // noteの記事へのリンク。サンプルデータは実在しないので、noteの検索結果に飛ばす
+  function noteLink(n) {
+    if (n.sample) return { href: `https://note.com/search?context=note&q=${encodeURIComponent(n.searchWord || n.title)}`, label: "noteで似た記事を探す" };
+    return { href: safeUrl(n.url), label: "noteで読む" };
   }
 
   function cardHtml(n, rank) {
@@ -293,39 +297,37 @@
     const batsu = state.batsu.has(n.key);
     const img = safeUrl(n.eyecatch);
     const avatar = safeUrl(n.creator?.avatar);
-    const fresh = hoursSince(n.publishedAt) <= 24 ? `<span class="fresh">新作</span>` : `<span class="fresh fresh--long">ロングセラー</span>`;
+    const link = noteLink(n);
+    const fresh = hoursSince(n.publishedAt) <= 24 ? `<span class="label label--new">新作</span>` : `<span class="label">ロングセラー</span>`;
     const partial = n.measuredHours != null && n.measuredHours < 24 && hoursSince(n.publishedAt) > 24
-      ? `<span class="stat" title="計測を始めてからの増加数です">計測${Math.floor(n.measuredHours)}h分</span>` : "";
-    const purchase = n.purchaseCount != null ? `<span class="stat stat--up">🛒 ${num(n.purchaseCount)}人購入</span>` : "";
+      ? `<span class="card__hint">計測を始めてから${Math.floor(n.measuredHours)}時間分</span>` : "";
     return `
-      <article class="card ${maru ? "is-maru" : ""} ${batsu ? "is-batsu" : ""}" data-key="${esc(n.key)}">
-        <div class="rank ${rank <= 3 ? "rank--" + rank : ""}">${rank}</div>
-        <div class="thumb" ${img ? `style="background-image:url('${esc(img)}')"` : ""}>${img ? "" : "✕○"}</div>
-        <div class="card__body">
-          <h3 class="card__title"><a href="${esc(safeUrl(n.url))}" target="_blank" rel="noopener">${esc(n.title)}</a>${fresh}</h3>
+      <article class="card ${rank <= 3 ? "card--top" : ""} ${maru ? "is-maru" : ""} ${batsu ? "is-batsu" : ""}" data-key="${esc(n.key)}">
+        <div class="card__rank ${rank <= 3 ? "card__rank--" + rank : ""}">${rank}</div>
+        <a class="card__thumb" href="${esc(link.href)}" target="_blank" rel="noopener" tabindex="-1" aria-hidden="true" ${img ? `style="background-image:url('${esc(img)}')"` : ""}>${img ? "" : `<img src="img/icon.webp" alt="">`}</a>
+        <div class="card__main">
+          <div class="card__meta">${fresh}${themeChips(n)}<span class="muted">公開 ${ago(n.publishedAt)}</span></div>
+          <h3 class="card__title"><a href="${esc(link.href)}" target="_blank" rel="noopener">${esc(n.title)}</a></h3>
           <div class="card__creator">
             ${avatar ? `<img class="avatar" src="${esc(avatar)}" alt="" loading="lazy">` : ""}
-            <button class="hashtag" data-creator="${esc(n.creator?.name)}">${esc(n.creator?.name || "不明")}</button>
-            <span>・公開 ${ago(n.publishedAt)}</span>
-            ${themeChips(n)}
+            <button class="linkish" data-creator="${esc(n.creator?.name)}">${esc(n.creator?.name || "不明")}</button>
           </div>
-          <div class="stats">
-            <span class="stat stat--sold">🛒 ${state.window}hで+${num(gainOf(n))}</span>
-            <span class="stat stat--price">${yen(n.price)}</span>
-            <span class="stat stat--heat">🔥 ${n.heat}</span>
-            ${state.window !== 3 && n.gain3h ? `<span class="stat stat--up">⤴ 3hで+${num(n.gain3h)}</span>` : ""}
-            <span class="stat">♥ 累計${num(n.likes)}</span>
-            ${partial}${purchase}
+          <div class="card__nums">
+            <div class="num-big"><span class="num-big__v">+${num(gainOf(n))}</span><span class="num-big__l">${state.window}時間で売れた</span></div>
+            <div class="num"><span class="num__v">${yen(n.price)}</span><span class="num__l">価格</span></div>
+            <div class="num"><span class="num__v">${n.heat}</span><span class="num__l">勢い</span></div>
+            <div class="num"><span class="num__v">${num(n.likes)}</span><span class="num__l">スキ累計</span></div>
           </div>
-          <div class="card__foot">
-            <div class="hashtags">${n.hashtags.slice(0, 5).map((t) => `<button class="hashtag" data-tag="${esc(t)}">#${esc(t)}</button>`).join("")}</div>
-            ${sparkSvg(n, 110, 32, "spark")}
-            <button class="card__more" data-detail="${esc(n.key)}">詳しく</button>
-          </div>
+          ${partial}
+          ${n.hashtags.length ? `<div class="card__tags">${n.hashtags.slice(0, 4).map((t) => `<button class="tag" data-tag="${esc(t)}">#${esc(t)}</button>`).join("")}</div>` : ""}
         </div>
-        <div class="actions">
-          <button class="mb mb--maru ${maru ? "on" : ""}" data-maru="${esc(n.key)}" title="保存" aria-pressed="${maru}">○</button>
-          <button class="mb mb--batsu ${batsu ? "on" : ""}" data-batsu="${esc(n.key)}" title="非表示" aria-pressed="${batsu}">✕</button>
+        <div class="card__side">
+          <a class="read-btn" href="${esc(link.href)}" target="_blank" rel="noopener">${link.label} <span aria-hidden="true">→</span></a>
+          <div class="card__sub-actions">
+            <button class="mini" data-detail="${esc(n.key)}">詳しく</button>
+            <button class="mini mini--icon ${maru ? "on" : ""}" data-maru="${esc(n.key)}" title="保存" aria-label="保存" aria-pressed="${maru}">○</button>
+            <button class="mini mini--icon ${batsu ? "on" : ""}" data-batsu="${esc(n.key)}" title="非表示" aria-label="非表示" aria-pressed="${batsu}">✕</button>
+          </div>
         </div>
       </article>`;
   }
@@ -340,7 +342,7 @@
       const maru = state.maru.has(n.key);
       return `<tr>
         <td class="num">${i + 1}</td>
-        <td class="title"><a href="${esc(safeUrl(n.url))}" target="_blank" rel="noopener">${esc(n.title)}</a><br><small class="muted">${esc(n.creator?.name || "")}</small></td>
+        <td class="title"><a href="${esc(noteLink(n).href)}" target="_blank" rel="noopener">${esc(n.title)}</a><br><small class="muted">${esc(n.creator?.name || "")}</small></td>
         <td>${n.themes.slice(0, 2).map((id) => esc(themeById(id)?.name || "")).join("<br>")}</td>
         <td class="num">${yen(n.price)}</td>
         <td class="num">${n.heat}</td>
@@ -350,7 +352,7 @@
         <td class="num">${yen(n.salesIndex)}</td>
         <td class="num">${num(n.likes)}</td>
         <td>${ago(n.publishedAt)}</td>
-        <td><button class="mb mb--maru ${maru ? "on" : ""}" data-maru="${esc(n.key)}" title="保存">○</button></td>
+        <td><button class="mini mini--icon ${maru ? "on" : ""}" data-maru="${esc(n.key)}" title="保存" aria-label="保存">○</button></td>
       </tr>`;
     }).join("");
     return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
@@ -460,7 +462,7 @@
       <p class="note-text">参考: 増えたスキの 30〜80% が購入者だと仮定すると、24時間の購入数はおよそ <b>${num(lo)}〜${num(hi)}件</b>、売上は <b>${yen(lo * n.price)}〜${yen(hi * n.price)}</b>。あくまで仮定に基づく目安です。</p>
       ${n.measuredHours != null && n.measuredHours < 24 && hoursSince(n.publishedAt) > 24 ? `<p class="note-text">※ この記事は計測を始めてから ${Math.floor(n.measuredHours)}時間分の増加数です。</p>` : ""}
       <p class="note-text">${n.hashtags.map((t) => "#" + esc(t)).join(" ")}</p>
-      <p style="margin-top:14px"><a class="btn" href="${esc(safeUrl(n.url))}" target="_blank" rel="noopener">noteで開く ↗</a></p>`;
+      <p class="detail__cta"><a class="read-btn" href="${esc(noteLink(n).href)}" target="_blank" rel="noopener">${noteLink(n).label} <span aria-hidden="true">→</span></a></p>`;
     $("#detail").showModal();
   }
 
@@ -549,13 +551,6 @@
       try { await navigator.clipboard.writeText(location.href); toast("この検索条件のURLをコピーしました"); }
       catch (_) { toast(location.href); }
     });
-    $("#themeBtn").addEventListener("click", () => {
-      const dark = document.documentElement.dataset.theme
-        ? document.documentElement.dataset.theme === "dark"
-        : matchMedia("(prefers-color-scheme: dark)").matches;
-      document.documentElement.dataset.theme = dark ? "light" : "dark";
-      save("nr:color", document.documentElement.dataset.theme);
-    });
 
     // 一覧・サイド内のボタンはまとめて委譲
     document.addEventListener("click", (e) => {
@@ -613,6 +608,8 @@
         key: "nsample" + i.toString(16).padStart(6, "0"),
         title: pickOne(titles[theme] || ["有料noteサンプル"]) + (rnd() > 0.7 ? "【保存版】" : ""),
         url: "https://note.com/",
+        sample: true,
+        searchWord: pickOne(tags),
         price, likes,
         publishedAt: new Date(now - age * 3600000).toISOString(),
         eyecatch: null,
@@ -630,8 +627,6 @@
   }
 
   // ---------- 起動 ----------
-  const color = load("nr:color", null);
-  if (color) document.documentElement.dataset.theme = color;
   state.view = load(STORE.view, "card") === "table" ? "table" : "card";
   readUrl();
   bind();

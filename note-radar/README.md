@@ -28,16 +28,15 @@ note.com は販売数を公開していません。そのため、有料noteの 
 
 ## 仕組み
 ```
-GitHub Actions（毎時） → scripts/fetch_notes.py → data/latest.json → GitHub Pages の画面
+GitHub Actions（毎時） → scripts/fetch_notes.py → data/latest.json をコミット → Netlify が自動で公開
 ```
 ブラウザから直接 note.com のデータは取れない（CORS の制限）ため、GitHub Actions がデータを集めて JSON にしています。
-データがまだ無いうちは、画面に **サンプルデータ** が表示されます。
+データがまだ無いうちは、画面に **サンプルデータ** が表示されます（サンプルの記事リンクは note の検索結果に飛びます）。
 
 ## 公開手順
-1. このブランチをデフォルトブランチにマージする（定期実行はデフォルトブランチでしか動かないため）
-2. GitHub の **Settings → Pages → Build and deployment → Source** を **GitHub Actions** にする
-3. **Actions → note-radar → Run workflow** で1回手動実行する
-4. 以降は毎時自動でデータが更新され、`https://<ユーザー名>.github.io/<リポジトリ名>/` で見られます
+1. このブランチをデフォルトブランチにマージする（毎時の自動実行はデフォルトブランチでしか動かないため）
+2. **Actions → note-radar → Run workflow** で1回手動実行する（すぐにデータを入れたいとき）
+3. 以降は毎時データが更新され、Netlify のサイトの `/note-radar/` で見られます
 
 ## ローカルで試す
 ```bash
